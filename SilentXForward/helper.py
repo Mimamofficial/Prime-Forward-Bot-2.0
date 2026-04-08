@@ -13,6 +13,8 @@ from pyrogram.errors import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+START_IMAGE = "https://files.catbox.moe/uybezy.jpg"
+
 START_TEXT = """<b>👋ʜᴇʟʟᴏ! ɪ ᴀᴍ ᴍʀɴ_ғᴏʀᴡᴀʀᴅ_ʙᴏᴛ.\n\nɪ ᴄᴀɴ ғᴏʀᴡᴀʀᴅ ᴠɪᴅᴇᴏs ᴀɴᴅ ᴅᴏᴄᴜᴍᴇɴᴛs ғʀᴏᴍ ᴍᴜʟᴛɪᴘʟᴇ ᴄʜᴀɴɴᴇʟs ᴛᴏ ᴍᴜʟᴛɪᴘʟᴇ ᴏᴛʜᴇʀ ᴄʜᴀɴɴᴇʟs, ғɪʟᴛᴇʀɪɴɢ ᴏᴜᴛ ᴜɴᴡᴀɴᴛᴇᴅ ᴄᴏɴᴛᴇɴᴛ.!! 😍\n<blockquote>🌿 ᴍᴀɪɴᴛᴀɪɴᴇᴅ ʙʏ : <a href="https://t.me/Mrn_Officialx">Mrn_Officialx</a></blockquote></b>"""
 
 HELP_TEXT = """<b>ℹ️ Help Menu
@@ -74,12 +76,9 @@ BUTTONS = InlineKeyboardMarkup(
 login_states = {}
 
 
-# ==================== KEY FIX: smart_get_chat ====================
+# ==================== smart_get_chat ====================
 async def smart_get_chat(client, chat_id, user_id):
-    """
-    Use userbot to get_chat (works for private channels).
-    Falls back to bot client if userbot not available.
-    """
+    """Use userbot for private channels, fallback to bot."""
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
     if ub and ub.is_connected:
@@ -95,10 +94,25 @@ async def smart_get_chat(client, chat_id, user_id):
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     try:
-        await message.reply(text=START_TEXT, parse_mode=enums.ParseMode.HTML,
-                            reply_markup=BUTTONS, disable_web_page_preview=True)
+        # ✅ Image ke saath start message
+        await message.reply_photo(
+            photo=START_IMAGE,
+            caption=START_TEXT,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=BUTTONS
+        )
     except Exception as e:
         logger.error(f"Error In Start Function: {e}")
+        # Fallback: image fail ho toh text send karo
+        try:
+            await message.reply(
+                text=START_TEXT,
+                parse_mode=enums.ParseMode.HTML,
+                reply_markup=BUTTONS,
+                disable_web_page_preview=True
+            )
+        except Exception as e2:
+            logger.error(f"Fallback also failed: {e2}")
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command(client, message):
@@ -134,7 +148,6 @@ async def set_channels(client, message: Message):
     target = message.command[2]
 
     try:
-        # ✅ FIX: userbot se get_chat — private channels bhi kaam karenge
         source_chat = await smart_get_chat(client, source, user_id)
         target_chat = await smart_get_chat(client, target, user_id)
 
