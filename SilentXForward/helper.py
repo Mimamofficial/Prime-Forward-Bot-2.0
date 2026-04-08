@@ -71,262 +71,217 @@ BUTTONS = InlineKeyboardMarkup(
 )
 
 # ==================== LOGIN STATE TRACKER ====================
-# { user_id: { "step": "phone"/"otp"/"password", "phone": ..., "phone_code_hash": ..., "temp_client": ... } }
 login_states = {}
 
-# ==================== EXISTING COMMANDS (unchanged) ====================
+
+# ==================== KEY FIX: smart_get_chat ====================
+async def smart_get_chat(client, chat_id, user_id):
+    """
+    Use userbot to get_chat (works for private channels).
+    Falls back to bot client if userbot not available.
+    """
+    from SilentXForward.forward import active_userbots
+    ub = active_userbots.get(user_id)
+    if ub and ub.is_connected:
+        try:
+            return await ub.get_chat(chat_id)
+        except Exception as e:
+            logger.warning(f"Userbot get_chat failed ({chat_id}): {e} — trying bot...")
+    return await client.get_chat(chat_id)
+
+
+# ==================== COMMANDS ====================
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     try:
-        await message.reply(
-            text=START_TEXT,
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=BUTTONS,
-            disable_web_page_preview=True
-        )
+        await message.reply(text=START_TEXT, parse_mode=enums.ParseMode.HTML,
+                            reply_markup=BUTTONS, disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Error In Start Function: {e}")
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command(client, message):
     try:
-        await message.reply(
-            text=HELP_TEXT,
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=BUTTONS,
-            disable_web_page_preview=True
-        )
+        await message.reply(text=HELP_TEXT, parse_mode=enums.ParseMode.HTML,
+                            reply_markup=BUTTONS, disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Error In Help Function: {e}")
 
 @Client.on_message(filters.command("about") & filters.private)
 async def about_command(client, message):
     try:
-        await message.reply(
-            text=ABOUT_TEXT,
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=BUTTONS,
-            disable_web_page_preview=True
-        )
+        await message.reply(text=ABOUT_TEXT, parse_mode=enums.ParseMode.HTML,
+                            reply_markup=BUTTONS, disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Error In About Function: {e}")
 
+
+# ── /set ──────────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("set") & filters.private)
 async def set_channels(client, message: Message):
     user_id = message.from_user.id
-    
+
     if len(message.command) < 3:
         await message.reply_text(
             "<b>❌ Usage:</b> <code>/set &lt;source_id&gt; &lt;target_id&gt;</code>\n\n"
-            "<b>Examples:</b>\n"
-            "<code>/set -1001234567890 -1009876543210</code>",
+            "<b>Example:</b>\n<code>/set -1001234567890 -1009876543210</code>",
             parse_mode=enums.ParseMode.HTML
         )
         return
-    
+
     source = message.command[1]
     target = message.command[2]
-    
+
     try:
-        source_chat = await client.get_chat(source)
-        target_chat = await client.get_chat(target)
-        
+        # ✅ FIX: userbot se get_chat — private channels bhi kaam karenge
+        source_chat = await smart_get_chat(client, source, user_id)
+        target_chat = await smart_get_chat(client, target, user_id)
+
         source_id = source_chat.id
         target_id = target_chat.id
-        
+
         result = await database.add_target_to_source(
-            user_id, 
-            source_id, 
-            target_id, 
-            source_chat.title, 
-            target_chat.title
+            user_id, source_id, target_id, source_chat.title, target_chat.title
         )
-        
+
         if result == "created":
             await message.reply_text(
                 f"<b>✅ New Source Created:</b>\n\n"
-                f"<b>📥 Source:</b> {source_chat.title}\n"
-                f"   <code>{source_id}</code>\n\n"
-                f"<b>📤 Target:</b> {target_chat.title}\n"
-                f"   <code>{target_id}</code>\n\n"
+                f"<b>📥 Source:</b> {source_chat.title}\n   <code>{source_id}</code>\n\n"
+                f"<b>📤 Target:</b> {target_chat.title}\n   <code>{target_id}</code>\n\n"
                 f"🎉 Messages Will Be Forwarded!",
                 parse_mode=enums.ParseMode.HTML
             )
         elif result == "added":
             await message.reply_text(
                 f"<b>✅ Target Added:</b>\n\n"
-                f"<b>📥 Source:</b> {source_chat.title}\n"
-                f"   <code>{source_id}</code>\n\n"
-                f"<b>📤 New Target:</b> {target_chat.title}\n"
-                f"   <code>{target_id}</code>",
+                f"<b>📥 Source:</b> {source_chat.title}\n   <code>{source_id}</code>\n\n"
+                f"<b>📤 New Target:</b> {target_chat.title}\n   <code>{target_id}</code>",
                 parse_mode=enums.ParseMode.HTML
             )
         else:
             await message.reply_text(
-                f"<b>⚠️ Already Exists:</b>\n\n"
-                f"This Target Is Already Set For This Source!",
+                "<b>⚠️ Already Exists:</b>\n\nThis Target Is Already Set For This Source!",
                 parse_mode=enums.ParseMode.HTML
             )
-            
+
     except Exception as e:
         await message.reply_text(
-            f"<b>❌ Error:</b> {e}\n\n"
-            "Make sure:\n"
-            "• Bot is admin in both channels\n"
-            "• Channel IDs are correct",
+            f"<b>❌ Error:</b> <code>{e}</code>\n\n"
+            "<b>Check karo:</b>\n"
+            "• /login kiya hai? (/session se check karo)\n"
+            "• Aapka account us channel ka member hai?\n"
+            "• Channel ID sahi hai?",
             parse_mode=enums.ParseMode.HTML
         )
 
+
+# ── /remove_target ────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("remove_target") & filters.private)
 async def remove_target_channel(client, message: Message):
     user_id = message.from_user.id
-    
+
     if len(message.command) < 3:
         await message.reply_text(
-            "<b>❌ Usage:</b> <code>/rem &lt;source_id&gt; &lt;target_id&gt;</code>\n\n"
-            "<b>Examples:</b>\n"
-            "<code>/rem -1001234567890 -1009876543210</code>",
+            "<b>❌ Usage:</b> <code>/remove_target &lt;source_id&gt; &lt;target_id&gt;</code>",
             parse_mode=enums.ParseMode.HTML
         )
         return
-    
-    source_input = message.command[1]
-    target_input = message.command[2]
-    
-    try:
-        source_chat = await client.get_chat(source_input)
-        source_id = source_chat.id
-        source_title = source_chat.title
 
-        target_chat = await client.get_chat(target_input)
-        target_id = target_chat.id
-        target_title = target_chat.title
-        
-        result = await database.remove_target_from_source(user_id, source_id, target_id)
-        
+    try:
+        source_chat = await smart_get_chat(client, message.command[1], user_id)
+        target_chat = await smart_get_chat(client, message.command[2], user_id)
+        result = await database.remove_target_from_source(user_id, source_chat.id, target_chat.id)
+
         if result == "removed":
             await message.reply_text(
-                f"<b>✅ Target Removed Successfully!</b>\n\n"
-                f"<b>📥 Source:</b> {source_title}\n"
-                f"   <code>{source_id}</code>\n\n"
-                f"<b>🗑️ Target:</b> {target_title}\n"
-                f"   <code>{target_id}</code>\n\n"
-                f"Target Channel Has Been Removed From This Source Mapping.",
+                f"<b>✅ Target Removed!</b>\n\n"
+                f"📥 Source: {source_chat.title} (<code>{source_chat.id}</code>)\n"
+                f"🗑️ Target: {target_chat.title} (<code>{target_chat.id}</code>)",
                 parse_mode=enums.ParseMode.HTML
             )
         else:
             await message.reply_text(
-                f"<b>⚠️ Not Found:</b>\n\n"
-                f"<b>📥 Source:</b> {source_title}\n"
-                f"<b>🗑️ Target:</b> {target_title}\n\n"
-                f"No Mapping Exists For This Source-target Pair.\n\n"
-                f"Use <code>/list</code> To See Your Current Mappings.",
+                "<b>⚠️ Not Found.</b> Use /list to see your mappings.",
                 parse_mode=enums.ParseMode.HTML
             )
-            
     except Exception as e:
-        await message.reply_text(
-            f"<b>❌ Error:</b> {e}\n\n"
-            f"Make sure both channel IDs are valid and accessible.",
-            parse_mode=enums.ParseMode.HTML
-        )
-        
+        await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
+
+
+# ── /remove_source ────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("remove_source") & filters.private)
 async def remove_channel(client, message: Message):
     user_id = message.from_user.id
-    
+
     if len(message.command) < 2:
         await message.reply_text(
-            "<b>❌ Usage:</b> <code>/rem &lt;source_id&gt;</code>\n\n"
-            "<b>Examples:</b>\n"
-            "<code>/rem -1001234567890</code>",
+            "<b>❌ Usage:</b> <code>/remove_source &lt;source_id&gt;</code>",
             parse_mode=enums.ParseMode.HTML
         )
         return
-    
-    source = message.command[1]
-    
+
     try:
-        chat = await client.get_chat(source)
-        source_id = chat.id
-        
-        removed = await database.remove_source(user_id, source_id)
-        
+        chat = await smart_get_chat(client, message.command[1], user_id)
+        removed = await database.remove_source(user_id, chat.id)
+
         if removed:
             await message.reply_text(
-                f"<b>✅ Removed:</b>\n\n"
-                f"<b>📥 Source:</b> {chat.title}\n"
-                f"   <code>{source_id}</code>\n\n"
-                f"All Targets For This Source Have Been Removed.",
+                f"<b>✅ Removed:</b> {chat.title} (<code>{chat.id}</code>)\n\nAll targets removed.",
                 parse_mode=enums.ParseMode.HTML
             )
         else:
             await message.reply_text(
-                f"<b>⚠️ Not Found:</b>\n\n"
-                f"No Targets Exists For <b>{chat.title}</b>\n\n"
-                f"Use /list To See Your Mappings.",
+                f"<b>⚠️ Not Found:</b> No targets for <b>{chat.title}</b>",
                 parse_mode=enums.ParseMode.HTML
             )
-            
     except Exception as e:
-        await message.reply_text(
-            f"<b>❌ Error:</b> {e}",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
 
+
+# ── /list ─────────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("list") & filters.private)
 async def list_mappings(client, message: Message):
     user_id = message.from_user.id
-    
     mappings = await database.get_user_mappings(user_id)
-    
+
     if not mappings:
         await message.reply_text(
-            "<b>❌ No mappings found!</b>\n\n"
-            "Use <code>/set &lt;source_id&gt; &lt;target_id&gt;</code> to create one.",
+            "<b>❌ No mappings found!</b>\n\nUse <code>/set &lt;source_id&gt; &lt;target_id&gt;</code>",
             parse_mode=enums.ParseMode.HTML
         )
         return
-    
+
     text = "<b>📊 Your Channel Mappings:</b>\n\n"
-    
     for idx, mapping in enumerate(mappings, 1):
         source_id = mapping['source_id']
         target_ids = mapping.get('target_ids', [])
-        
         try:
-            source_chat = await client.get_chat(source_id)
-            text += f"<b>{idx}. 📥 {source_chat.title}</b>\n"
-            text += f"   <code>{source_id}</code>\n"
-            text += f"   ⤵️ <b>Targets ({len(target_ids)}):</b>\n"
-            
-            for target_id in target_ids:
+            sc = await smart_get_chat(client, source_id, user_id)
+            text += f"<b>{idx}. 📥 {sc.title}</b>\n   <code>{source_id}</code>\n   ⤵️ Targets ({len(target_ids)}):\n"
+            for tid in target_ids:
                 try:
-                    target_chat = await client.get_chat(target_id)
-                    text += f"   • {target_chat.title} (<code>{target_id}</code>)\n"
+                    tc = await smart_get_chat(client, tid, user_id)
+                    text += f"   • {tc.title} (<code>{tid}</code>)\n"
                 except:
-                    text += f"   • <code>{target_id}</code> (Unable to fetch)\n"
-            
+                    text += f"   • <code>{tid}</code>\n"
             text += "\n"
         except:
-            text += f"<b>{idx}.</b> <code>{source_id}</code> (Unable to fetch)\n"
-            text += f"   Targets: {len(target_ids)}\n\n"
-    
+            text += f"<b>{idx}.</b> <code>{source_id}</code> — {len(target_ids)} target(s)\n\n"
+
     text += f"<b>Total Sources:</b> {len(mappings)}"
-    
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
+
+# ── /clear ────────────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("clear") & filters.private)
 async def clear_all(client, message: Message):
     user_id = message.from_user.id
-    
     count = await database.clear_all_mappings(user_id)
-    
     if count > 0:
         await message.reply_text(
-            f"<b>✅ Cleared {count} source(s)!</b>\n\n"
-            f"All Your Mappings Have Been Removed.",
+            f"<b>✅ Cleared {count} source(s)!</b>",
             parse_mode=enums.ParseMode.HTML
         )
     else:
@@ -336,30 +291,25 @@ async def clear_all(client, message: Message):
         )
 
 
-# ==================== USERBOT LOGIN COMMANDS (NEW) ====================
+# ==================== USERBOT LOGIN COMMANDS ====================
 
 @Client.on_message(filters.command("login") & filters.private)
 async def cmd_login(client, message: Message):
     user_id = message.from_user.id
-
-    # Check if already logged in
     existing = await database.get_userbot_session(user_id)
     if existing:
         return await message.reply_text(
             "<b>✅ Aap already login hain!</b>\n\n"
             f"📱 Phone: <code>{existing.get('phone', 'N/A')}</code>\n"
             f"🕐 Since: {existing.get('created_at', 'N/A')}\n\n"
-            "Logout karne ke liye: /logout\n"
-            "Status dekhne ke liye: /session",
+            "Logout: /logout | Status: /session",
             parse_mode=enums.ParseMode.HTML
         )
-
     login_states[user_id] = {"step": "phone"}
     await message.reply_text(
         "<b>🔑 Userbot Login</b>\n\n"
         "Apna Telegram <b>phone number</b> bhejein.\n"
-        "Format: <code>+919876543210</code>\n\n"
-        "❌ Cancel: /cancel",
+        "Format: <code>+919876543210</code>\n\n❌ Cancel: /cancel",
         parse_mode=enums.ParseMode.HTML
     )
 
@@ -367,8 +317,6 @@ async def cmd_login(client, message: Message):
 @Client.on_message(filters.command("logout") & filters.private)
 async def cmd_logout(client, message: Message):
     user_id = message.from_user.id
-
-    # Stop running userbot if any
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
     if ub:
@@ -377,43 +325,32 @@ async def cmd_logout(client, message: Message):
         except Exception:
             pass
         active_userbots.pop(user_id, None)
-
     deleted = await database.delete_userbot_session(user_id)
     if deleted:
-        await message.reply_text(
-            "<b>✅ Successfully logout ho gaye!</b>\n\n"
-            "Dobara login ke liye: /login",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("<b>✅ Logout successful!</b>\n\nDobara login: /login",
+                                 parse_mode=enums.ParseMode.HTML)
     else:
-        await message.reply_text(
-            "<b>⚠️ Aap pehle se logged out hain.</b>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("<b>⚠️ Aap pehle se logged out hain.</b>",
+                                 parse_mode=enums.ParseMode.HTML)
 
 
 @Client.on_message(filters.command("session") & filters.private)
 async def cmd_session(client, message: Message):
     user_id = message.from_user.id
     session = await database.get_userbot_session(user_id)
-
     if not session:
         return await message.reply_text(
-            "<b>❌ Koi active session nahi hai.</b>\n\n"
-            "/login se apna account connect karein.",
+            "<b>❌ Koi active session nahi hai.</b>\n\n/login se connect karein.",
             parse_mode=enums.ParseMode.HTML
         )
-
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
     status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
-
     await message.reply_text(
         f"<b>📋 Session Info</b>\n\n"
         f"👤 Status: {status}\n"
         f"📱 Phone: <code>{session.get('phone', 'N/A')}</code>\n"
-        f"🕐 Login: {session.get('created_at', 'N/A')}\n\n"
-        f"Logout: /logout",
+        f"🕐 Login: {session.get('created_at', 'N/A')}\n\nLogout: /logout",
         parse_mode=enums.ParseMode.HTML
     )
 
@@ -422,7 +359,6 @@ async def cmd_session(client, message: Message):
 async def cmd_cancel(client, message: Message):
     user_id = message.from_user.id
     if user_id in login_states:
-        # Disconnect temp client if exists
         tc = login_states[user_id].get("temp_client")
         if tc:
             try:
@@ -430,12 +366,13 @@ async def cmd_cancel(client, message: Message):
             except Exception:
                 pass
         del login_states[user_id]
-        await message.reply_text("<b>❌ Login process cancel kar diya.</b>", parse_mode=enums.ParseMode.HTML)
+        await message.reply_text("<b>❌ Login cancel kar diya.</b>", parse_mode=enums.ParseMode.HTML)
     else:
-        await message.reply_text("<b>⚠️ Koi active login process nahi hai.</b>", parse_mode=enums.ParseMode.HTML)
+        await message.reply_text("<b>⚠️ Koi active login process nahi hai.</b>",
+                                 parse_mode=enums.ParseMode.HTML)
 
 
-# ==================== LOGIN STEP HANDLER (OTP / PASSWORD) ====================
+# ==================== LOGIN STEP HANDLER ====================
 
 @Client.on_message(
     filters.private & filters.text &
@@ -444,105 +381,66 @@ async def cmd_cancel(client, message: Message):
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
-
     if user_id not in login_states:
-        return  # Not in login flow, ignore
+        return
 
     state = login_states[user_id]
     step = state.get("step")
 
-    # ── Step 1: Phone number ──────────────────────────────────────────────────
+    # ── Step 1: Phone ─────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
-        msg = await message.reply_text("⏳ OTP bhej raha hoon...", parse_mode=enums.ParseMode.HTML)
-
+        msg = await message.reply_text("⏳ OTP bhej raha hoon...")
         import config as cfg
-        temp_client = Client(
-            f"temp_{user_id}",
-            api_id=cfg.API_ID,
-            api_hash=cfg.API_HASH,
-            in_memory=True,
-        )
+        temp_client = Client(f"temp_{user_id}", api_id=cfg.API_ID, api_hash=cfg.API_HASH, in_memory=True)
         try:
             await temp_client.connect()
             sent = await temp_client.send_code(phone)
-
-            state["step"] = "otp"
-            state["phone"] = phone
-            state["phone_code_hash"] = sent.phone_code_hash
-            state["temp_client"] = temp_client
+            state.update({"step": "otp", "phone": phone,
+                          "phone_code_hash": sent.phone_code_hash, "temp_client": temp_client})
             login_states[user_id] = state
-
             await msg.edit(
-                "<b>📩 OTP bhej diya gaya!</b>\n\n"
-                "Apne Telegram par aaya <b>OTP</b> yahan bhejein.\n"
-                "Format: <code>12345</code>\n\n"
-                "❌ Cancel: /cancel",
+                "<b>📩 OTP bhej diya!</b>\n\nTelegram OTP yahan bhejein.\nFormat: <code>12345</code>\n\n❌ /cancel",
                 parse_mode=enums.ParseMode.HTML
             )
         except PhoneNumberInvalid:
             await temp_client.disconnect()
             del login_states[user_id]
-            await msg.edit(
-                "<b>❌ Invalid phone number!</b>\n"
-                "Sahi format: <code>+919876543210</code>",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await msg.edit("<b>❌ Invalid phone number!</b>\nFormat: <code>+919876543210</code>",
+                           parse_mode=enums.ParseMode.HTML)
         except Exception as e:
             await temp_client.disconnect()
             del login_states[user_id]
-            await msg.edit(
-                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await msg.edit(f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
+                           parse_mode=enums.ParseMode.HTML)
 
-    # ── Step 2: OTP ──────────────────────────────────────────────────────────
+    # ── Step 2: OTP ───────────────────────────────────────────────
     elif step == "otp":
         otp = message.text.strip().replace(" ", "")
         temp_client = state.get("temp_client")
-        phone = state["phone"]
-        phone_code_hash = state["phone_code_hash"]
-
         try:
-            await temp_client.sign_in(phone, phone_code_hash, otp)
+            await temp_client.sign_in(state["phone"], state["phone_code_hash"], otp)
             session_string = await temp_client.export_session_string()
             await temp_client.disconnect()
-
-            await database.save_userbot_session(user_id, session_string, phone)
+            await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
-
-            # Start the userbot immediately
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
-
             await message.reply_text(
-                "<b>✅ Login Successful!</b>\n\n"
-                "🤖 Aapka userbot start ho gaya!\n"
-                "Ab aap <b>private channels</b> bhi source/target set kar sakte hain.\n\n"
-                "📋 Status: /session\n"
-                "🚪 Logout: /logout",
+                "<b>✅ Login Successful!</b>\n\n🤖 Userbot start ho gaya!\nAb private channels bhi /set kar sakte hain.\n\n📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
-
         except PhoneCodeInvalid:
-            await message.reply_text(
-                "<b>❌ Galat OTP!</b> Dobara sahi OTP bhejein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await message.reply_text("<b>❌ Galat OTP!</b> Dobara bhejein.", parse_mode=enums.ParseMode.HTML)
         except PhoneCodeExpired:
             await temp_client.disconnect()
             del login_states[user_id]
-            await message.reply_text(
-                "<b>⏰ OTP expire ho gaya!</b> Dobara /login karein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await message.reply_text("<b>⏰ OTP expire!</b> Dobara /login karein.", parse_mode=enums.ParseMode.HTML)
         except SessionPasswordNeeded:
             state["step"] = "password"
             login_states[user_id] = state
             await message.reply_text(
-                "<b>🔐 2-Step Verification enabled hai!</b>\n\n"
-                "Apna <b>password</b> bhejein:\n\n"
-                "❌ Cancel: /cancel",
+                "<b>🔐 2-Step Verification!</b>\n\nApna password bhejein:\n\n❌ /cancel",
                 parse_mode=enums.ParseMode.HTML
             )
         except Exception as e:
@@ -551,47 +449,31 @@ async def login_step_handler(client, message: Message):
             except Exception:
                 pass
             del login_states[user_id]
-            await message.reply_text(
-                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login karein.",
+                                     parse_mode=enums.ParseMode.HTML)
 
-    # ── Step 3: 2FA Password ──────────────────────────────────────────────────
+    # ── Step 3: 2FA ───────────────────────────────────────────────
     elif step == "password":
-        password = message.text.strip()
         temp_client = state.get("temp_client")
-        phone = state["phone"]
-
         try:
-            await temp_client.check_password(password)
+            await temp_client.check_password(message.text.strip())
             session_string = await temp_client.export_session_string()
             await temp_client.disconnect()
-
-            await database.save_userbot_session(user_id, session_string, phone)
+            await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
-
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
-
             await message.reply_text(
-                "<b>✅ Login Successful! (2FA)</b>\n\n"
-                "🤖 Aapka userbot start ho gaya!\n\n"
-                "📋 Status: /session\n"
-                "🚪 Logout: /logout",
+                "<b>✅ Login Successful! (2FA)</b>\n\n🤖 Userbot start ho gaya!\n\n📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
         except PasswordHashInvalid:
-            await message.reply_text(
-                "<b>❌ Galat password!</b> Dobara sahi password bhejein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await message.reply_text("<b>❌ Galat password!</b> Dobara bhejein.", parse_mode=enums.ParseMode.HTML)
         except Exception as e:
             try:
                 await temp_client.disconnect()
             except Exception:
                 pass
             del login_states[user_id]
-            await message.reply_text(
-                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
-                parse_mode=enums.ParseMode.HTML
-            )
+            await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login karein.",
+                                     parse_mode=enums.ParseMode.HTML)
