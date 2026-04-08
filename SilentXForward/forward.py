@@ -319,7 +319,7 @@ async def process_buffered_messages(source_chat_id, source_client=None):
 @Client.on_message(
     filters.channel &
     (filters.video | filters.document | filters.photo |
-     filters.audio | filters.animation | filters.text)
+     filters.audio | filters.sticker | filters.animation | filters.text)
 )
 async def forward_content(client, message):
     """Bot listens to public/channels where it is admin."""
