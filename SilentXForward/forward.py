@@ -22,13 +22,14 @@ message_queue = asyncio.Queue()
 message_buffer = defaultdict(list)
 buffer_tasks = {}
 
+# Bot client reference (set in start_forwarder)
+_bot_client = None
+
 # ==================== USERBOT REGISTRY ====================
-# { user_id (int): pyrogram.Client }
 active_userbots: dict[int, Client] = {}
 
 
 async def start_single_userbot(user_id: int, session_string: str) -> Client:
-    """Start a userbot for one user and register it."""
     old = active_userbots.get(user_id)
     if old:
         try:
@@ -46,9 +47,6 @@ async def start_single_userbot(user_id: int, session_string: str) -> Client:
     )
     await ub.start()
     active_userbots[user_id] = ub
-
-    # ✅ KEY FIX: Register message handler on this userbot
-    # So userbot listens to private channels too
     _register_userbot_handler(ub, user_id)
 
     me = await ub.get_me()
@@ -57,12 +55,6 @@ async def start_single_userbot(user_id: int, session_string: str) -> Client:
 
 
 def _register_userbot_handler(ub: Client, user_id: int):
-    """
-    Register a channel message handler on the userbot client.
-    This allows the userbot to capture messages from private channels
-    that the bot cannot access.
-    """
-
     @ub.on_message(
         filters.channel &
         (filters.video | filters.document | filters.photo |
@@ -91,7 +83,6 @@ def _register_userbot_handler(ub: Client, user_id: int):
 
 
 async def restore_all_userbots():
-    """Called at bot startup — reload all saved sessions from MongoDB."""
     sessions = await database.get_all_userbot_sessions()
     logger.info(f"Restoring {len(sessions)} userbot session(s)...")
     for doc in sessions:
@@ -107,11 +98,9 @@ async def restore_all_userbots():
 
 
 async def stop_all_userbots():
-    """Called at bot shutdown — gracefully stop all userbots."""
     for uid, ub in list(active_userbots.items()):
         try:
             await ub.stop()
-            logger.info(f"Userbot stopped: user_id={uid}")
         except Exception as e:
             logger.warning(f"Error stopping userbot {uid}: {e}")
     active_userbots.clear()
@@ -136,15 +125,8 @@ async def handle_flood(func, **kwargs):
 
 # ================= SINGLE FORWARD =================
 async def forward_single_message(client, message, chat_id, sender_client=None):
-    """
-    Forward one message to chat_id.
-    sender_client: the client used to copy/send (bot or userbot).
-    If not provided, uses the main bot client.
-    """
     try:
-        # Use provided sender_client (could be userbot), fallback to client (bot)
         writer = sender_client if sender_client else client
-
         await handle_flood(
             writer.copy_message,
             chat_id=chat_id,
@@ -154,7 +136,6 @@ async def forward_single_message(client, message, chat_id, sender_client=None):
         return True
     except Exception:
         logger.exception(f"Forward failed msg_id={getattr(message, 'id', None)} -> {chat_id}")
-        # Try bot as fallback if userbot failed
         if sender_client and sender_client != client:
             try:
                 await handle_flood(
@@ -180,12 +161,13 @@ async def forward_buffered_messages(client, messages, chat_id, sender_client=Non
         except Exception:
             logger.exception(f"Error forwarding buffered msg -> {chat_id}")
         await asyncio.sleep(MSG_DELAY)
-    logger.info(f"Buffered forwarded {success}/{len(messages)} -> {chat_id}")
-    return success > 0
+    return success
 
 
 # ================= QUEUE WORKER =================
 async def process_queue(client):
+    from SilentXForward.logger import log_forward_success, log_forward_failed
+
     sem = asyncio.Semaphore(TARGET_CONCURRENCY)
 
     async def forward_target(chat_id, payload, ftype, sender_client):
@@ -196,25 +178,47 @@ async def process_queue(client):
 
     while True:
         try:
-            payload, targets, ftype, retry_count, sender_client = await message_queue.get()
+            payload, targets, ftype, retry_count, sender_client, source_info = await message_queue.get()
             failed = []
+            succeeded = []
 
             tasks = [forward_target(tid, payload, ftype, sender_client) for tid in targets]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+            msg_count = len(payload) if isinstance(payload, list) else 1
+            source_id = source_info.get("id", 0)
+            source_title = source_info.get("title", str(source_id))
+
             for tid, res in zip(targets, results):
                 if isinstance(res, Exception):
                     logger.error(f"Exception forwarding to {tid}: {res}")
-                    failed.append(tid)
-                elif res is not True:
-                    failed.append(tid)
-
-            if failed:
-                if retry_count < MAX_RETRIES:
-                    logger.info(f"Retrying {len(failed)} targets (attempt {retry_count + 1}/{MAX_RETRIES})")
-                    await message_queue.put((payload, failed, ftype, retry_count + 1, sender_client))
+                    failed.append((tid, str(res)))
+                elif res is False or res == 0:
+                    failed.append((tid, "Forward returned False"))
                 else:
-                    logger.error(f"Giving up on {len(failed)} targets: {failed}")
+                    succeeded.append(tid)
+
+            # ✅ Log successes
+            for tid in succeeded:
+                try:
+                    await log_forward_success(client, source_title, source_id, tid, msg_count)
+                except Exception:
+                    pass
+
+            # ❌ Log failures (only on final retry)
+            if failed:
+                failed_tids = [f[0] for f in failed]
+                if retry_count < MAX_RETRIES:
+                    logger.info(f"Retrying {len(failed_tids)} targets (attempt {retry_count + 1}/{MAX_RETRIES})")
+                    await message_queue.put((payload, failed_tids, ftype, retry_count + 1,
+                                            sender_client, source_info))
+                else:
+                    logger.error(f"Giving up on {len(failed_tids)} targets: {failed_tids}")
+                    for tid, err in failed:
+                        try:
+                            await log_forward_failed(client, source_id, tid, msg_count, err)
+                        except Exception:
+                            pass
 
             message_queue.task_done()
             await asyncio.sleep(TARGET_DELAY)
@@ -244,7 +248,7 @@ async def worker_watchdog(client):
             logger.exception("Watchdog error")
 
 
-# ================= START / STOP PROCESSORS =================
+# ================= START / STOP =================
 async def start_processor(client):
     tasks = {}
     for i in range(QUEUE_WORKERS):
@@ -255,6 +259,8 @@ async def start_processor(client):
     return tasks
 
 async def start_forwarder(client):
+    global _bot_client
+    _bot_client = client
     if getattr(client, "_queue_tasks", None):
         return
     await restore_all_userbots()
@@ -274,16 +280,23 @@ async def stop_forwarder(client, timeout: float = 5.0):
 
 # ================= BUFFER PROCESSOR =================
 async def process_buffered_messages(source_chat_id, source_client=None):
-    """
-    source_client: the client that received the message (bot or userbot).
-    Used as writer so it can copy from the source channel.
-    """
     try:
         await asyncio.sleep(BUFFER_DELAY)
 
         messages = message_buffer.pop(source_chat_id, None)
         if not messages:
             return
+
+        # Get source title for logging
+        source_title = str(source_chat_id)
+        try:
+            if source_client:
+                chat = await source_client.get_chat(source_chat_id)
+                source_title = chat.title or source_title
+        except Exception:
+            pass
+
+        source_info = {"id": source_chat_id, "title": source_title}
 
         mappings = await database.get_all_targets_for_source(source_chat_id)
         for mapping in mappings:
@@ -293,17 +306,14 @@ async def process_buffered_messages(source_chat_id, source_client=None):
             if not targets:
                 continue
 
-            # Pick the right sender: userbot of the mapping owner if available
-            sender = source_client  # default: whoever received the message
+            sender = source_client
             if user_id and user_id in active_userbots:
                 ub = active_userbots[user_id]
                 if ub.is_connected:
                     sender = ub
 
-            await message_queue.put((messages.copy(), targets, "buffered", 0, sender))
-            logger.info(
-                f"Queued {len(messages)} msgs from {source_chat_id} -> {len(targets)} targets (user={user_id})"
-            )
+            await message_queue.put((messages.copy(), targets, "buffered", 0, sender, source_info))
+            logger.info(f"Queued {len(messages)} msgs from {source_chat_id} -> {len(targets)} targets")
 
     except asyncio.CancelledError:
         logger.debug(f"Buffer task for {source_chat_id} cancelled")
@@ -315,14 +325,13 @@ async def process_buffered_messages(source_chat_id, source_client=None):
         buffer_tasks.pop(source_chat_id, None)
 
 
-# ================= BOT MESSAGE LISTENER (public channels) =================
+# ================= BOT MESSAGE LISTENER =================
 @Client.on_message(
     filters.channel &
     (filters.video | filters.document | filters.photo |
      filters.audio | filters.sticker | filters.animation | filters.text)
 )
 async def forward_content(client, message):
-    """Bot listens to public/channels where it is admin."""
     try:
         cid = message.chat.id
         message_buffer[cid].append(message)
@@ -335,7 +344,6 @@ async def forward_content(client, message):
             except Exception:
                 pass
 
-        # Pass bot client as source_client
         buffer_tasks[cid] = asyncio.create_task(
             process_buffered_messages(cid, source_client=client)
         )
