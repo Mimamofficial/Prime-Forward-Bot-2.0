@@ -2,7 +2,13 @@ import logging
 from SilentXForward import database
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-
+from pyrogram.errors import (
+    PhoneNumberInvalid,
+    PhoneCodeInvalid,
+    PhoneCodeExpired,
+    SessionPasswordNeeded,
+    PasswordHashInvalid,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,12 +27,19 @@ I Am An Auto-Forward Bot. I Forward Files From Source Channels To Target Channel
 /remove_target &lt;source_id&gt; &lt;target_id&gt; - Remove A Target From Source
 /remove_source &lt;source_id&gt; - Remove Source
 /list - View All Set Channels 
-/clear - Clear All Mappings</b>
+/clear - Clear All Mappings
+
+🔑 Userbot Login (Private Channels):
+/login - Login with your Telegram account
+/logout - Logout & remove your session
+/session - Check your login status
+/cancel - Cancel ongoing login process</b>
 
 <b>How to use:
-1. Add Me To Source Channels And Target Channels As Admin.
-2. Use /set command to link source to target channels.
-3. I Will Automatically Forward Videos And Documents!</b>
+1. Use /login to connect your Telegram account (for private channels).
+2. Add Me To Source Channels And Target Channels As Admin (for public channels).
+3. Use /set command to link source to target channels.
+4. I Will Automatically Forward Videos And Documents!</b>
 
 <b>Channel: @Mrn_Officialx</b>
 """
@@ -45,6 +58,7 @@ ABOUT_TEXT = """<b><blockquote>╭────[ ᴍʏ ᴅᴇᴛᴀɪʟs ]──�
 <blockquote>├⍟ FloodWait Handling</blockquote>
 <blockquote>├⍟ MongoDB Database</blockquote>
 <blockquote>├⍟ Queue System</blockquote>
+<blockquote>├⍟ Userbot Session Login ✨</blockquote>
 <blockquote>╰───────────────⍟</b></blockquote>"""
 
 BUTTONS = InlineKeyboardMarkup(
@@ -55,6 +69,12 @@ BUTTONS = InlineKeyboardMarkup(
         ]
     ]
 )
+
+# ==================== LOGIN STATE TRACKER ====================
+# { user_id: { "step": "phone"/"otp"/"password", "phone": ..., "phone_code_hash": ..., "temp_client": ... } }
+login_states = {}
+
+# ==================== EXISTING COMMANDS (unchanged) ====================
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
@@ -314,3 +334,264 @@ async def clear_all(client, message: Message):
             "<b>❌ You Don't Have Any Mappings To Clear!</b>",
             parse_mode=enums.ParseMode.HTML
         )
+
+
+# ==================== USERBOT LOGIN COMMANDS (NEW) ====================
+
+@Client.on_message(filters.command("login") & filters.private)
+async def cmd_login(client, message: Message):
+    user_id = message.from_user.id
+
+    # Check if already logged in
+    existing = await database.get_userbot_session(user_id)
+    if existing:
+        return await message.reply_text(
+            "<b>✅ Aap already login hain!</b>\n\n"
+            f"📱 Phone: <code>{existing.get('phone', 'N/A')}</code>\n"
+            f"🕐 Since: {existing.get('created_at', 'N/A')}\n\n"
+            "Logout karne ke liye: /logout\n"
+            "Status dekhne ke liye: /session",
+            parse_mode=enums.ParseMode.HTML
+        )
+
+    login_states[user_id] = {"step": "phone"}
+    await message.reply_text(
+        "<b>🔑 Userbot Login</b>\n\n"
+        "Apna Telegram <b>phone number</b> bhejein.\n"
+        "Format: <code>+919876543210</code>\n\n"
+        "❌ Cancel: /cancel",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+
+@Client.on_message(filters.command("logout") & filters.private)
+async def cmd_logout(client, message: Message):
+    user_id = message.from_user.id
+
+    # Stop running userbot if any
+    from SilentXForward.forward import active_userbots
+    ub = active_userbots.get(user_id)
+    if ub:
+        try:
+            await ub.stop()
+        except Exception:
+            pass
+        active_userbots.pop(user_id, None)
+
+    deleted = await database.delete_userbot_session(user_id)
+    if deleted:
+        await message.reply_text(
+            "<b>✅ Successfully logout ho gaye!</b>\n\n"
+            "Dobara login ke liye: /login",
+            parse_mode=enums.ParseMode.HTML
+        )
+    else:
+        await message.reply_text(
+            "<b>⚠️ Aap pehle se logged out hain.</b>",
+            parse_mode=enums.ParseMode.HTML
+        )
+
+
+@Client.on_message(filters.command("session") & filters.private)
+async def cmd_session(client, message: Message):
+    user_id = message.from_user.id
+    session = await database.get_userbot_session(user_id)
+
+    if not session:
+        return await message.reply_text(
+            "<b>❌ Koi active session nahi hai.</b>\n\n"
+            "/login se apna account connect karein.",
+            parse_mode=enums.ParseMode.HTML
+        )
+
+    from SilentXForward.forward import active_userbots
+    ub = active_userbots.get(user_id)
+    status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
+
+    await message.reply_text(
+        f"<b>📋 Session Info</b>\n\n"
+        f"👤 Status: {status}\n"
+        f"📱 Phone: <code>{session.get('phone', 'N/A')}</code>\n"
+        f"🕐 Login: {session.get('created_at', 'N/A')}\n\n"
+        f"Logout: /logout",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+
+@Client.on_message(filters.command("cancel") & filters.private)
+async def cmd_cancel(client, message: Message):
+    user_id = message.from_user.id
+    if user_id in login_states:
+        # Disconnect temp client if exists
+        tc = login_states[user_id].get("temp_client")
+        if tc:
+            try:
+                await tc.disconnect()
+            except Exception:
+                pass
+        del login_states[user_id]
+        await message.reply_text("<b>❌ Login process cancel kar diya.</b>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text("<b>⚠️ Koi active login process nahi hai.</b>", parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== LOGIN STEP HANDLER (OTP / PASSWORD) ====================
+
+@Client.on_message(
+    filters.private & filters.text &
+    ~filters.command(["login", "logout", "session", "cancel", "start", "help", "about",
+                      "set", "remove_target", "remove_source", "list", "clear"])
+)
+async def login_step_handler(client, message: Message):
+    user_id = message.from_user.id
+
+    if user_id not in login_states:
+        return  # Not in login flow, ignore
+
+    state = login_states[user_id]
+    step = state.get("step")
+
+    # ── Step 1: Phone number ──────────────────────────────────────────────────
+    if step == "phone":
+        phone = message.text.strip()
+        msg = await message.reply_text("⏳ OTP bhej raha hoon...", parse_mode=enums.ParseMode.HTML)
+
+        import config as cfg
+        temp_client = Client(
+            f"temp_{user_id}",
+            api_id=cfg.API_ID,
+            api_hash=cfg.API_HASH,
+            in_memory=True,
+        )
+        try:
+            await temp_client.connect()
+            sent = await temp_client.send_code(phone)
+
+            state["step"] = "otp"
+            state["phone"] = phone
+            state["phone_code_hash"] = sent.phone_code_hash
+            state["temp_client"] = temp_client
+            login_states[user_id] = state
+
+            await msg.edit(
+                "<b>📩 OTP bhej diya gaya!</b>\n\n"
+                "Apne Telegram par aaya <b>OTP</b> yahan bhejein.\n"
+                "Format: <code>12345</code>\n\n"
+                "❌ Cancel: /cancel",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except PhoneNumberInvalid:
+            await temp_client.disconnect()
+            del login_states[user_id]
+            await msg.edit(
+                "<b>❌ Invalid phone number!</b>\n"
+                "Sahi format: <code>+919876543210</code>",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            await temp_client.disconnect()
+            del login_states[user_id]
+            await msg.edit(
+                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
+                parse_mode=enums.ParseMode.HTML
+            )
+
+    # ── Step 2: OTP ──────────────────────────────────────────────────────────
+    elif step == "otp":
+        otp = message.text.strip().replace(" ", "")
+        temp_client = state.get("temp_client")
+        phone = state["phone"]
+        phone_code_hash = state["phone_code_hash"]
+
+        try:
+            await temp_client.sign_in(phone, phone_code_hash, otp)
+            session_string = await temp_client.export_session_string()
+            await temp_client.disconnect()
+
+            await database.save_userbot_session(user_id, session_string, phone)
+            del login_states[user_id]
+
+            # Start the userbot immediately
+            from SilentXForward.forward import start_single_userbot
+            await start_single_userbot(user_id, session_string)
+
+            await message.reply_text(
+                "<b>✅ Login Successful!</b>\n\n"
+                "🤖 Aapka userbot start ho gaya!\n"
+                "Ab aap <b>private channels</b> bhi source/target set kar sakte hain.\n\n"
+                "📋 Status: /session\n"
+                "🚪 Logout: /logout",
+                parse_mode=enums.ParseMode.HTML
+            )
+
+        except PhoneCodeInvalid:
+            await message.reply_text(
+                "<b>❌ Galat OTP!</b> Dobara sahi OTP bhejein.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except PhoneCodeExpired:
+            await temp_client.disconnect()
+            del login_states[user_id]
+            await message.reply_text(
+                "<b>⏰ OTP expire ho gaya!</b> Dobara /login karein.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except SessionPasswordNeeded:
+            state["step"] = "password"
+            login_states[user_id] = state
+            await message.reply_text(
+                "<b>🔐 2-Step Verification enabled hai!</b>\n\n"
+                "Apna <b>password</b> bhejein:\n\n"
+                "❌ Cancel: /cancel",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            try:
+                await temp_client.disconnect()
+            except Exception:
+                pass
+            del login_states[user_id]
+            await message.reply_text(
+                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
+                parse_mode=enums.ParseMode.HTML
+            )
+
+    # ── Step 3: 2FA Password ──────────────────────────────────────────────────
+    elif step == "password":
+        password = message.text.strip()
+        temp_client = state.get("temp_client")
+        phone = state["phone"]
+
+        try:
+            await temp_client.check_password(password)
+            session_string = await temp_client.export_session_string()
+            await temp_client.disconnect()
+
+            await database.save_userbot_session(user_id, session_string, phone)
+            del login_states[user_id]
+
+            from SilentXForward.forward import start_single_userbot
+            await start_single_userbot(user_id, session_string)
+
+            await message.reply_text(
+                "<b>✅ Login Successful! (2FA)</b>\n\n"
+                "🤖 Aapka userbot start ho gaya!\n\n"
+                "📋 Status: /session\n"
+                "🚪 Logout: /logout",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except PasswordHashInvalid:
+            await message.reply_text(
+                "<b>❌ Galat password!</b> Dobara sahi password bhejein.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            try:
+                await temp_client.disconnect()
+            except Exception:
+                pass
+            del login_states[user_id]
+            await message.reply_text(
+                f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
+                parse_mode=enums.ParseMode.HTML
+            )
