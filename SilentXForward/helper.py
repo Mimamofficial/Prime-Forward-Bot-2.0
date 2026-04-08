@@ -432,7 +432,7 @@ async def login_step_handler(client, message: Message):
                           "phone_code_hash": sent.phone_code_hash, "temp_client": temp_client})
             login_states[user_id] = state
             await msg.edit(
-                "<b>📩 OTP bhej diya!</b>\n\nTelegram OTP yahan bhejein.\nFormat: <code>12345</code>\n\n❌ /cancel",
+                "<b>📩 OTP bhej diya!</b>\n\nTelegram OTP yahan bhejein.\nFormat: <code>123 45</code>\n\n❌ /cancel",
                 parse_mode=enums.ParseMode.HTML
             )
         except PhoneNumberInvalid:
