@@ -12,6 +12,7 @@ from pyrogram.errors import (
     PhoneCodeExpired,
     SessionPasswordNeeded,
     PasswordHashInvalid,
+    PeerIdInvalid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -97,19 +98,44 @@ BUTTONS = InlineKeyboardMarkup(
     ]
 )
 
-# ==================== LOGIN STATE TRACKER ====================
 login_states = {}
 
 
-# ==================== smart_get_chat ====================
+# ==================== KEY FIX: smart_get_chat ====================
 async def smart_get_chat(client, chat_id, user_id):
+    """
+    Properly resolve a channel peer using userbot.
+    Handles PEER_ID_INVALID by trying invite link join or get_dialogs trick.
+    Falls back to bot if userbot unavailable.
+    """
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
+
     if ub and ub.is_connected:
+        # Try direct get_chat first
         try:
             return await ub.get_chat(chat_id)
+        except PeerIdInvalid:
+            # ✅ FIX: Force userbot to "meet" this peer by iterating dialogs
+            # This resolves the peer in Pyrogram's internal cache
+            logger.info(f"PeerIdInvalid for {chat_id} — trying to resolve via dialogs...")
+            try:
+                async for dialog in ub.get_dialogs():
+                    if dialog.chat.id == int(chat_id):
+                        return dialog.chat
+            except Exception as e:
+                logger.warning(f"Dialog iteration failed: {e}")
+
+            # Last attempt after dialog resolution
+            try:
+                return await ub.get_chat(chat_id)
+            except Exception as e:
+                logger.warning(f"Userbot still can't get chat {chat_id}: {e} — trying bot...")
+
         except Exception as e:
             logger.warning(f"Userbot get_chat failed ({chat_id}): {e} — trying bot...")
+
+    # Fallback to bot
     return await client.get_chat(chat_id)
 
 
@@ -118,9 +144,7 @@ async def smart_get_chat(client, chat_id, user_id):
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     try:
-        # ✅ Log new user
         await log_new_user(client, message.from_user)
-
         await message.reply_photo(
             photo=START_IMAGE,
             caption=START_TEXT,
@@ -170,6 +194,9 @@ async def set_channels(client, message: Message):
     source = message.command[1]
     target = message.command[2]
 
+    # Show processing message
+    proc_msg = await message.reply_text("⏳ Processing...", parse_mode=enums.ParseMode.HTML)
+
     try:
         source_chat = await smart_get_chat(client, source, user_id)
         target_chat = await smart_get_chat(client, target, user_id)
@@ -181,27 +208,17 @@ async def set_channels(client, message: Message):
             user_id, source_id, target_id, source_chat.title, target_chat.title
         )
 
-        if result == "created":
+        await proc_msg.delete()
+
+        if result in ("created", "added"):
+            action = "New Source Created" if result == "created" else "Target Added"
             await message.reply_text(
-                f"<b>✅ New Source Created:</b>\n\n"
+                f"<b>✅ {action}:</b>\n\n"
                 f"<b>📥 Source:</b> {source_chat.title}\n   <code>{source_id}</code>\n\n"
                 f"<b>📤 Target:</b> {target_chat.title}\n   <code>{target_id}</code>\n\n"
                 f"🎉 Messages Will Be Forwarded!",
                 parse_mode=enums.ParseMode.HTML
             )
-            # ✅ Log event
-            await log_source_added(client, message.from_user,
-                                   source_chat.title, source_id,
-                                   target_chat.title, target_id)
-
-        elif result == "added":
-            await message.reply_text(
-                f"<b>✅ Target Added:</b>\n\n"
-                f"<b>📥 Source:</b> {source_chat.title}\n   <code>{source_id}</code>\n\n"
-                f"<b>📤 New Target:</b> {target_chat.title}\n   <code>{target_id}</code>",
-                parse_mode=enums.ParseMode.HTML
-            )
-            # ✅ Log event
             await log_source_added(client, message.from_user,
                                    source_chat.title, source_id,
                                    target_chat.title, target_id)
@@ -211,7 +228,19 @@ async def set_channels(client, message: Message):
                 parse_mode=enums.ParseMode.HTML
             )
 
+    except PeerIdInvalid:
+        await proc_msg.delete()
+        await message.reply_text(
+            "<b>❌ PEER_ID_INVALID Error!</b>\n\n"
+            "<b>Iska matlab:</b> Aapka userbot in channels ko nahi jaanta.\n\n"
+            "<b>Fix karo:</b>\n"
+            "1. Apne Telegram account se <b>dono channels open karo</b> (sirf ek baar scroll karo)\n"
+            "2. Phir dobara /set try karo\n\n"
+            "<i>Telegram pe channels kholo taaki userbot unhe pehchaan sake.</i>",
+            parse_mode=enums.ParseMode.HTML
+        )
     except Exception as e:
+        await proc_msg.delete()
         await message.reply_text(
             f"<b>❌ Error:</b> <code>{e}</code>\n\n"
             "<b>Check karo:</b>\n"
@@ -246,7 +275,6 @@ async def remove_target_channel(client, message: Message):
                 f"🗑️ Target: {target_chat.title} (<code>{target_chat.id}</code>)",
                 parse_mode=enums.ParseMode.HTML
             )
-            # ✅ Log event
             await log_target_removed(client, message.from_user,
                                      source_chat.title, source_chat.id,
                                      target_chat.title, target_chat.id)
@@ -280,7 +308,6 @@ async def remove_channel(client, message: Message):
                 f"<b>✅ Removed:</b> {chat.title} (<code>{chat.id}</code>)\n\nAll targets removed.",
                 parse_mode=enums.ParseMode.HTML
             )
-            # ✅ Log event
             await log_source_removed(client, message.from_user, chat.title, chat.id)
         else:
             await message.reply_text(
@@ -372,7 +399,6 @@ async def cmd_logout(client, message: Message):
         active_userbots.pop(user_id, None)
     deleted = await database.delete_userbot_session(user_id)
     if deleted:
-        # ✅ Log logout
         await log_logout(client, message.from_user)
         await message.reply_text("<b>✅ Logout successful!</b>\n\nDobara login: /login",
                                  parse_mode=enums.ParseMode.HTML)
@@ -434,7 +460,6 @@ async def login_step_handler(client, message: Message):
     state = login_states[user_id]
     step = state.get("step")
 
-    # ── Step 1: Phone ─────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
         msg = await message.reply_text("⏳ OTP bhej raha hoon...")
@@ -447,7 +472,7 @@ async def login_step_handler(client, message: Message):
                           "phone_code_hash": sent.phone_code_hash, "temp_client": temp_client})
             login_states[user_id] = state
             await msg.edit(
-                "<b>📩 OTP bhej diya!</b>\n\nTelegram OTP yahan bhejein.\nFormat: <code>123 45</code>\n\n❌ /cancel",
+                "<b>📩 OTP bhej diya!</b>\n\nTelegram OTP yahan bhejein.\nFormat: <code>1 2 3 4 5</code>\n\n❌ /cancel",
                 parse_mode=enums.ParseMode.HTML
             )
         except PhoneNumberInvalid:
@@ -461,7 +486,6 @@ async def login_step_handler(client, message: Message):
             await msg.edit(f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login try karein.",
                            parse_mode=enums.ParseMode.HTML)
 
-    # ── Step 2: OTP ───────────────────────────────────────────────
     elif step == "otp":
         otp = message.text.strip().replace(" ", "")
         temp_client = state.get("temp_client")
@@ -471,15 +495,15 @@ async def login_step_handler(client, message: Message):
             await temp_client.disconnect()
             await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
-
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
-
-            # ✅ Log login event
             await log_login(client, message.from_user, state["phone"])
-
             await message.reply_text(
-                "<b>✅ Login Successful!</b>\n\n🤖 Userbot start ho gaya!\nAb private channels bhi /set kar sakte hain.\n\n📋 /session | 🚪 /logout",
+                "<b>✅ Login Successful!</b>\n\n"
+                "🤖 Userbot start ho gaya!\n\n"
+                "<b>⚠️ Important:</b> Ab apne Telegram account se <b>source aur target channels ek baar kholo</b> "
+                "(scroll karo), phir /set command use karo.\n\n"
+                "📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
         except PhoneCodeInvalid:
@@ -504,7 +528,6 @@ async def login_step_handler(client, message: Message):
             await message.reply_text(f"<b>❌ Error:</b> <code>{e}</code>\n\nDobara /login karein.",
                                      parse_mode=enums.ParseMode.HTML)
 
-    # ── Step 3: 2FA ───────────────────────────────────────────────
     elif step == "password":
         temp_client = state.get("temp_client")
         try:
@@ -513,15 +536,15 @@ async def login_step_handler(client, message: Message):
             await temp_client.disconnect()
             await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
-
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
-
-            # ✅ Log login event
             await log_login(client, message.from_user, state["phone"])
-
             await message.reply_text(
-                "<b>✅ Login Successful! (2FA)</b>\n\n🤖 Userbot start ho gaya!\n\n📋 /session | 🚪 /logout",
+                "<b>✅ Login Successful! (2FA)</b>\n\n"
+                "🤖 Userbot start ho gaya!\n\n"
+                "<b>⚠️ Important:</b> Ab apne Telegram account se <b>source aur target channels ek baar kholo</b> "
+                "(scroll karo), phir /set command use karo.\n\n"
+                "📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
         except PasswordHashInvalid:
