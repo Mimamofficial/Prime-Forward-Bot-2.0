@@ -15,8 +15,27 @@ logger = logging.getLogger(__name__)
 
 START_IMAGE = "https://files.catbox.moe/uybezy.jpg"
 
-START_TEXT = """<b>👋ʜᴇʟʟᴏ! ɪ ᴀᴍ ᴍʀɴ_ғᴏʀᴡᴀʀᴅ_ʙᴏᴛ.\n\nɪ ᴄᴀɴ ғᴏʀᴡᴀʀᴅ ᴠɪᴅᴇᴏs ᴀɴᴅ ᴅᴏᴄᴜᴍᴇɴᴛs ғʀᴏᴍ ᴍᴜʟᴛɪᴘʟᴇ ᴄʜᴀɴɴᴇʟs ᴛᴏ ᴍᴜʟᴛɪᴘʟᴇ ᴏᴛʜᴇʀ ᴄʜᴀɴɴᴇʟs, ғɪʟᴛᴇʀɪɴɢ ᴏᴜᴛ ᴜɴᴡᴀɴᴛᴇᴅ ᴄᴏɴᴛᴇɴᴛ.!! 😍\n<blockquote>🌿 ᴍᴀɪɴᴛᴀɪɴᴇᴅ ʙʏ : <a href="https://t.me/Mrn_Officialx">Mrn_Officialx</a></blockquote></b>"""
+START_TEXT = """<b>🎬 Prime Forward Bot</b>
 
+<i>Your Ultimate Auto Forwarding System 🚀</i>
+
+━━━━━━━━━━━━━━━
+⚡ Smart Features:
+• Multi Source ➜ Multi Target
+• Auto Video / File Forward
+• Private Channel Support 🔐
+• Fast • Secure • Reliable
+
+━━━━━━━━━━━━━━━
+🎯 Get Started:
+➤ /login (for private access)
+➤ /set source target
+➤ Sit back & enjoy automation 😎
+
+<blockquote>👨‍💻 Maintained by <a href="https://t.me/Mrn_Officialx">Mrn Official</a></blockquote>
+
+🔥 Experience Next Level Forwarding</b>
+"""
 HELP_TEXT = """<b>ℹ️ Help Menu
 
 I Am An Auto-Forward Bot. I Forward Files From Source Channels To Target Channels.</b>
