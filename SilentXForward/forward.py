@@ -58,7 +58,7 @@ def _register_userbot_handler(ub: Client, user_id: int):
     @ub.on_message(
         filters.channel &
         (filters.video | filters.document | filters.photo |
-         filters.audio | filters.animation | filters.text)
+         filters.audio | filters.sticker | filters.animation | filters.text)
     )
     async def userbot_forward_content(client, message):
         try:
