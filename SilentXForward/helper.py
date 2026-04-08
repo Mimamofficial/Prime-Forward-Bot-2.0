@@ -1,5 +1,9 @@
 import logging
 from SilentXForward import database
+from SilentXForward.logger import (
+    log_new_user, log_login, log_logout,
+    log_source_added, log_source_removed, log_target_removed
+)
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import (
@@ -36,6 +40,7 @@ START_TEXT = """<b>🎬 Prime Forward Bot
 
 🔥 Experience Next Level Forwarding</b>
 """
+
 HELP_TEXT = """<b>ℹ️ Help Menu
 
 I Am An Auto-Forward Bot. I Forward Files From Source Channels To Target Channels.</b>
@@ -80,6 +85,7 @@ ABOUT_TEXT = """<b><blockquote>╭────[ ᴍʏ ᴅᴇᴛᴀɪʟs ]──�
 <blockquote>├⍟ MongoDB Database</blockquote>
 <blockquote>├⍟ Queue System</blockquote>
 <blockquote>├⍟ Userbot Session Login ✨</blockquote>
+<blockquote>├⍟ Log Channel Support 📋</blockquote>
 <blockquote>╰───────────────⍟</b></blockquote>"""
 
 BUTTONS = InlineKeyboardMarkup(
@@ -97,7 +103,6 @@ login_states = {}
 
 # ==================== smart_get_chat ====================
 async def smart_get_chat(client, chat_id, user_id):
-    """Use userbot for private channels, fallback to bot."""
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
     if ub and ub.is_connected:
@@ -113,7 +118,9 @@ async def smart_get_chat(client, chat_id, user_id):
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     try:
-        # ✅ Image ke saath start message
+        # ✅ Log new user
+        await log_new_user(client, message.from_user)
+
         await message.reply_photo(
             photo=START_IMAGE,
             caption=START_TEXT,
@@ -122,16 +129,12 @@ async def start_command(client, message):
         )
     except Exception as e:
         logger.error(f"Error In Start Function: {e}")
-        # Fallback: image fail ho toh text send karo
         try:
-            await message.reply(
-                text=START_TEXT,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=BUTTONS,
-                disable_web_page_preview=True
-            )
+            await message.reply(text=START_TEXT, parse_mode=enums.ParseMode.HTML,
+                                reply_markup=BUTTONS, disable_web_page_preview=True)
         except Exception as e2:
-            logger.error(f"Fallback also failed: {e2}")
+            logger.error(f"Fallback failed: {e2}")
+
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command(client, message):
@@ -140,6 +143,7 @@ async def help_command(client, message):
                             reply_markup=BUTTONS, disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Error In Help Function: {e}")
+
 
 @Client.on_message(filters.command("about") & filters.private)
 async def about_command(client, message):
@@ -185,6 +189,11 @@ async def set_channels(client, message: Message):
                 f"🎉 Messages Will Be Forwarded!",
                 parse_mode=enums.ParseMode.HTML
             )
+            # ✅ Log event
+            await log_source_added(client, message.from_user,
+                                   source_chat.title, source_id,
+                                   target_chat.title, target_id)
+
         elif result == "added":
             await message.reply_text(
                 f"<b>✅ Target Added:</b>\n\n"
@@ -192,6 +201,10 @@ async def set_channels(client, message: Message):
                 f"<b>📤 New Target:</b> {target_chat.title}\n   <code>{target_id}</code>",
                 parse_mode=enums.ParseMode.HTML
             )
+            # ✅ Log event
+            await log_source_added(client, message.from_user,
+                                   source_chat.title, source_id,
+                                   target_chat.title, target_id)
         else:
             await message.reply_text(
                 "<b>⚠️ Already Exists:</b>\n\nThis Target Is Already Set For This Source!",
@@ -233,6 +246,10 @@ async def remove_target_channel(client, message: Message):
                 f"🗑️ Target: {target_chat.title} (<code>{target_chat.id}</code>)",
                 parse_mode=enums.ParseMode.HTML
             )
+            # ✅ Log event
+            await log_target_removed(client, message.from_user,
+                                     source_chat.title, source_chat.id,
+                                     target_chat.title, target_chat.id)
         else:
             await message.reply_text(
                 "<b>⚠️ Not Found.</b> Use /list to see your mappings.",
@@ -263,6 +280,8 @@ async def remove_channel(client, message: Message):
                 f"<b>✅ Removed:</b> {chat.title} (<code>{chat.id}</code>)\n\nAll targets removed.",
                 parse_mode=enums.ParseMode.HTML
             )
+            # ✅ Log event
+            await log_source_removed(client, message.from_user, chat.title, chat.id)
         else:
             await message.reply_text(
                 f"<b>⚠️ Not Found:</b> No targets for <b>{chat.title}</b>",
@@ -312,15 +331,9 @@ async def clear_all(client, message: Message):
     user_id = message.from_user.id
     count = await database.clear_all_mappings(user_id)
     if count > 0:
-        await message.reply_text(
-            f"<b>✅ Cleared {count} source(s)!</b>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text(f"<b>✅ Cleared {count} source(s)!</b>", parse_mode=enums.ParseMode.HTML)
     else:
-        await message.reply_text(
-            "<b>❌ You Don't Have Any Mappings To Clear!</b>",
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text("<b>❌ You Don't Have Any Mappings To Clear!</b>", parse_mode=enums.ParseMode.HTML)
 
 
 # ==================== USERBOT LOGIN COMMANDS ====================
@@ -359,6 +372,8 @@ async def cmd_logout(client, message: Message):
         active_userbots.pop(user_id, None)
     deleted = await database.delete_userbot_session(user_id)
     if deleted:
+        # ✅ Log logout
+        await log_logout(client, message.from_user)
         await message.reply_text("<b>✅ Logout successful!</b>\n\nDobara login: /login",
                                  parse_mode=enums.ParseMode.HTML)
     else:
@@ -456,8 +471,13 @@ async def login_step_handler(client, message: Message):
             await temp_client.disconnect()
             await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
+
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
+
+            # ✅ Log login event
+            await log_login(client, message.from_user, state["phone"])
+
             await message.reply_text(
                 "<b>✅ Login Successful!</b>\n\n🤖 Userbot start ho gaya!\nAb private channels bhi /set kar sakte hain.\n\n📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
@@ -493,8 +513,13 @@ async def login_step_handler(client, message: Message):
             await temp_client.disconnect()
             await database.save_userbot_session(user_id, session_string, state["phone"])
             del login_states[user_id]
+
             from SilentXForward.forward import start_single_userbot
             await start_single_userbot(user_id, session_string)
+
+            # ✅ Log login event
+            await log_login(client, message.from_user, state["phone"])
+
             await message.reply_text(
                 "<b>✅ Login Successful! (2FA)</b>\n\n🤖 Userbot start ho gaya!\n\n📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
