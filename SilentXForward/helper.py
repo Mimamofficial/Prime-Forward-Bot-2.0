@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 START_IMAGE = "https://files.catbox.moe/x4fufo.jpg"
 
-START_TEXT = """<b>🎬 Prime Forward Bot</b>
+START_TEXT = """<b>🎬 Prime Forward Bot
 
 <i>Your Ultimate Auto Forwarding System 🚀</i>
 
