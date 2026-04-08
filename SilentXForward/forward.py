@@ -22,14 +22,13 @@ message_queue = asyncio.Queue()
 message_buffer = defaultdict(list)
 buffer_tasks = {}
 
-# ==================== USERBOT REGISTRY (NEW) ====================
+# ==================== USERBOT REGISTRY ====================
 # { user_id (int): pyrogram.Client }
 active_userbots: dict[int, Client] = {}
 
 
 async def start_single_userbot(user_id: int, session_string: str) -> Client:
-    """Start a userbot for one user and register it in active_userbots."""
-    # Stop old one if exists
+    """Start a userbot for one user and register it."""
     old = active_userbots.get(user_id)
     if old:
         try:
@@ -48,9 +47,47 @@ async def start_single_userbot(user_id: int, session_string: str) -> Client:
     await ub.start()
     active_userbots[user_id] = ub
 
+    # ✅ KEY FIX: Register message handler on this userbot
+    # So userbot listens to private channels too
+    _register_userbot_handler(ub, user_id)
+
     me = await ub.get_me()
     logger.info(f"✅ Userbot started: user_id={user_id} → @{me.username} ({me.first_name})")
     return ub
+
+
+def _register_userbot_handler(ub: Client, user_id: int):
+    """
+    Register a channel message handler on the userbot client.
+    This allows the userbot to capture messages from private channels
+    that the bot cannot access.
+    """
+
+    @ub.on_message(
+        filters.channel &
+        (filters.video | filters.document | filters.photo |
+         filters.audio | filters.animation | filters.text)
+    )
+    async def userbot_forward_content(client, message):
+        try:
+            cid = message.chat.id
+            message_buffer[cid].append(message)
+
+            old = buffer_tasks.get(cid)
+            if old and not old.done():
+                try:
+                    old.cancel()
+                    await asyncio.sleep(0)
+                except Exception:
+                    pass
+
+            buffer_tasks[cid] = asyncio.create_task(
+                process_buffered_messages(cid, source_client=client)
+            )
+        except Exception:
+            logger.exception(f"Userbot handler error for user {user_id}")
+
+    logger.info(f"✅ Userbot handler registered for user_id={user_id}")
 
 
 async def restore_all_userbots():
@@ -98,22 +135,18 @@ async def handle_flood(func, **kwargs):
 
 
 # ================= SINGLE FORWARD =================
-async def forward_single_message(client, message, chat_id, user_id: int = None):
+async def forward_single_message(client, message, chat_id, sender_client=None):
     """
     Forward one message to chat_id.
-    If user_id is given and that user has an active userbot, use it
-    (allows reading from private/restricted source channels).
+    sender_client: the client used to copy/send (bot or userbot).
+    If not provided, uses the main bot client.
     """
     try:
-        # Use userbot as reader if available, else fall back to bot
-        reader = client
-        if user_id is not None:
-            ub = active_userbots.get(user_id)
-            if ub and ub.is_connected:
-                reader = ub
+        # Use provided sender_client (could be userbot), fallback to client (bot)
+        writer = sender_client if sender_client else client
 
         await handle_flood(
-            reader.copy_message,
+            writer.copy_message,
             chat_id=chat_id,
             from_chat_id=message.chat.id,
             message_id=message.id,
@@ -121,19 +154,31 @@ async def forward_single_message(client, message, chat_id, user_id: int = None):
         return True
     except Exception:
         logger.exception(f"Forward failed msg_id={getattr(message, 'id', None)} -> {chat_id}")
+        # Try bot as fallback if userbot failed
+        if sender_client and sender_client != client:
+            try:
+                await handle_flood(
+                    client.copy_message,
+                    chat_id=chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                )
+                return True
+            except Exception:
+                logger.exception(f"Bot fallback also failed -> {chat_id}")
         return False
 
 
 # ================= BUFFER FORWARD =================
-async def forward_buffered_messages(client, messages, chat_id, user_id: int = None):
+async def forward_buffered_messages(client, messages, chat_id, sender_client=None):
     success = 0
     for msg in sorted(messages, key=lambda m: m.id):
         try:
-            ok = await forward_single_message(client, msg, chat_id, user_id=user_id)
+            ok = await forward_single_message(client, msg, chat_id, sender_client=sender_client)
             if ok:
                 success += 1
         except Exception:
-            logger.exception(f"Error forwarding buffered msg {getattr(msg, 'id', None)} -> {chat_id}")
+            logger.exception(f"Error forwarding buffered msg -> {chat_id}")
         await asyncio.sleep(MSG_DELAY)
     logger.info(f"Buffered forwarded {success}/{len(messages)} -> {chat_id}")
     return success > 0
@@ -143,18 +188,18 @@ async def forward_buffered_messages(client, messages, chat_id, user_id: int = No
 async def process_queue(client):
     sem = asyncio.Semaphore(TARGET_CONCURRENCY)
 
-    async def forward_target(chat_id, payload, ftype, user_id):
+    async def forward_target(chat_id, payload, ftype, sender_client):
         async with sem:
             if ftype == "buffered":
-                return await forward_buffered_messages(client, payload, chat_id, user_id=user_id)
-            return await forward_single_message(client, payload, chat_id, user_id=user_id)
+                return await forward_buffered_messages(client, payload, chat_id, sender_client=sender_client)
+            return await forward_single_message(client, payload, chat_id, sender_client=sender_client)
 
     while True:
         try:
-            payload, targets, ftype, retry_count, user_id = await message_queue.get()
+            payload, targets, ftype, retry_count, sender_client = await message_queue.get()
             failed = []
 
-            tasks = [forward_target(tid, payload, ftype, user_id) for tid in targets]
+            tasks = [forward_target(tid, payload, ftype, sender_client) for tid in targets]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for tid, res in zip(targets, results):
@@ -167,15 +212,15 @@ async def process_queue(client):
             if failed:
                 if retry_count < MAX_RETRIES:
                     logger.info(f"Retrying {len(failed)} targets (attempt {retry_count + 1}/{MAX_RETRIES})")
-                    await message_queue.put((payload, failed, ftype, retry_count + 1, user_id))
+                    await message_queue.put((payload, failed, ftype, retry_count + 1, sender_client))
                 else:
-                    logger.error(f"Giving up on {len(failed)} targets after {MAX_RETRIES} retries: {failed}")
+                    logger.error(f"Giving up on {len(failed)} targets: {failed}")
 
             message_queue.task_done()
             await asyncio.sleep(TARGET_DELAY)
 
         except asyncio.CancelledError:
-            logger.info("Queue worker cancelled, shutting down")
+            logger.info("Queue worker cancelled")
             raise
         except Exception:
             logger.exception("Unexpected error in queue worker — continuing")
@@ -212,7 +257,6 @@ async def start_processor(client):
 async def start_forwarder(client):
     if getattr(client, "_queue_tasks", None):
         return
-    # Restore all saved userbot sessions on startup
     await restore_all_userbots()
     client._queue_tasks = await start_processor(client)
 
@@ -228,8 +272,12 @@ async def stop_forwarder(client, timeout: float = 5.0):
     client._queue_tasks = {}
 
 
-# ================= BUFFER HANDLER =================
-async def process_buffered_messages(source_chat_id):
+# ================= BUFFER PROCESSOR =================
+async def process_buffered_messages(source_chat_id, source_client=None):
+    """
+    source_client: the client that received the message (bot or userbot).
+    Used as writer so it can copy from the source channel.
+    """
     try:
         await asyncio.sleep(BUFFER_DELAY)
 
@@ -240,12 +288,22 @@ async def process_buffered_messages(source_chat_id):
         mappings = await database.get_all_targets_for_source(source_chat_id)
         for mapping in mappings:
             targets = mapping.get("target_ids", [])
-            user_id = mapping.get("user_id")   # ← pass user_id so we pick right userbot
-            if targets:
-                await message_queue.put((messages.copy(), targets, "buffered", 0, user_id))
-                logger.info(
-                    f"Queued {len(messages)} msgs from {source_chat_id} -> {len(targets)} targets (user={user_id})"
-                )
+            user_id = mapping.get("user_id")
+
+            if not targets:
+                continue
+
+            # Pick the right sender: userbot of the mapping owner if available
+            sender = source_client  # default: whoever received the message
+            if user_id and user_id in active_userbots:
+                ub = active_userbots[user_id]
+                if ub.is_connected:
+                    sender = ub
+
+            await message_queue.put((messages.copy(), targets, "buffered", 0, sender))
+            logger.info(
+                f"Queued {len(messages)} msgs from {source_chat_id} -> {len(targets)} targets (user={user_id})"
+            )
 
     except asyncio.CancelledError:
         logger.debug(f"Buffer task for {source_chat_id} cancelled")
@@ -257,13 +315,14 @@ async def process_buffered_messages(source_chat_id):
         buffer_tasks.pop(source_chat_id, None)
 
 
-# ================= MESSAGE LISTENER =================
+# ================= BOT MESSAGE LISTENER (public channels) =================
 @Client.on_message(
     filters.channel &
     (filters.video | filters.document | filters.photo |
-     filters.audio | filters.sticker | filters.animation | filters.text)
+     filters.audio | filters.animation | filters.text)
 )
 async def forward_content(client, message):
+    """Bot listens to public/channels where it is admin."""
     try:
         cid = message.chat.id
         message_buffer[cid].append(message)
@@ -274,8 +333,11 @@ async def forward_content(client, message):
                 old.cancel()
                 await asyncio.sleep(0)
             except Exception:
-                logger.debug("Old buffer task cancel raised", exc_info=True)
+                pass
 
-        buffer_tasks[cid] = asyncio.create_task(process_buffered_messages(cid))
+        # Pass bot client as source_client
+        buffer_tasks[cid] = asyncio.create_task(
+            process_buffered_messages(cid, source_client=client)
+        )
     except Exception:
-        logger.exception("Handler error")
+        logger.exception("Bot handler error")
