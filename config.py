@@ -14,5 +14,9 @@ PING_INTERVAL = int(os.environ.get("PING_INTERVAL", "300"))
 TG_WORKERS = int(os.environ.get("TG_WORKERS", "4"))
 
 # Your Koyeb/Heroku App Url
-# Example : https://yorappurl.koyeb.app/
+# Example : https://yourappurl.koyeb.app/
 APP_URL = os.environ.get("APP_URL", None)
+
+# Log Channel ID — Yahan saare events log honge
+# Example: -1001234567890
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1002338165303")) or None
