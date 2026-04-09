@@ -22,11 +22,25 @@ message_queue = asyncio.Queue()
 message_buffer = defaultdict(list)
 buffer_tasks = {}
 
-# Bot client reference (set in start_forwarder)
+# ✅ FIX: Track already-seen message IDs to prevent double forwarding
+# { chat_id: set of message_ids }
+seen_message_ids: dict[int, set] = defaultdict(set)
+
 _bot_client = None
 
 # ==================== USERBOT REGISTRY ====================
 active_userbots: dict[int, Client] = {}
+
+
+def _is_duplicate(chat_id: int, message_id: int) -> bool:
+    """Return True if this message was already added to buffer."""
+    if message_id in seen_message_ids[chat_id]:
+        return True
+    seen_message_ids[chat_id].add(message_id)
+    # Keep set small — only last 500 message IDs per chat
+    if len(seen_message_ids[chat_id]) > 500:
+        seen_message_ids[chat_id] = set(list(seen_message_ids[chat_id])[-500:])
+    return False
 
 
 async def start_single_userbot(user_id: int, session_string: str) -> Client:
@@ -58,11 +72,19 @@ def _register_userbot_handler(ub: Client, user_id: int):
     @ub.on_message(
         filters.channel &
         (filters.video | filters.document | filters.photo |
-         filters.audio | filters.sticker | filters.animation | filters.text)
+         filters.audio | filters.animation | filters.text |
+         filters.sticker | filters.voice | filters.video_note |
+         filters.poll | filters.location | filters.contact)
     )
     async def userbot_forward_content(client, message):
         try:
             cid = message.chat.id
+
+            # ✅ DEDUP CHECK — skip if bot already added this message
+            if _is_duplicate(cid, message.id):
+                logger.debug(f"Userbot skipping duplicate msg_id={message.id} chat={cid}")
+                return
+
             message_buffer[cid].append(message)
 
             old = buffer_tasks.get(cid)
@@ -198,14 +220,12 @@ async def process_queue(client):
                 else:
                     succeeded.append(tid)
 
-            # ✅ Log successes
             for tid in succeeded:
                 try:
                     await log_forward_success(client, source_title, source_id, tid, msg_count)
                 except Exception:
                     pass
 
-            # ❌ Log failures (only on final retry)
             if failed:
                 failed_tids = [f[0] for f in failed]
                 if retry_count < MAX_RETRIES:
@@ -287,7 +307,15 @@ async def process_buffered_messages(source_chat_id, source_client=None):
         if not messages:
             return
 
-        # Get source title for logging
+        # Deduplicate messages list by message ID (extra safety)
+        seen = set()
+        unique_messages = []
+        for m in messages:
+            if m.id not in seen:
+                seen.add(m.id)
+                unique_messages.append(m)
+        messages = unique_messages
+
         source_title = str(source_chat_id)
         try:
             if source_client:
@@ -329,11 +357,20 @@ async def process_buffered_messages(source_chat_id, source_client=None):
 @Client.on_message(
     filters.channel &
     (filters.video | filters.document | filters.photo |
-     filters.audio | filters.sticker | filters.animation | filters.text)
+     filters.audio | filters.animation | filters.text |
+     filters.sticker | filters.voice | filters.video_note |
+     filters.poll | filters.location | filters.contact)
 )
 async def forward_content(client, message):
+    """Bot listens to channels where it is admin/member."""
     try:
         cid = message.chat.id
+
+        # ✅ DEDUP CHECK — skip if userbot already added this message
+        if _is_duplicate(cid, message.id):
+            logger.debug(f"Bot skipping duplicate msg_id={message.id} chat={cid}")
+            return
+
         message_buffer[cid].append(message)
 
         old = buffer_tasks.get(cid)
