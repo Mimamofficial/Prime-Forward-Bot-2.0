@@ -7,23 +7,22 @@ from SilentXForward import database
 import config as cfg
 
 # ================= CONFIG =================
-BUFFER_DELAY = 2
-QUEUE_WORKERS = 3
+BUFFER_DELAY    = 2
+QUEUE_WORKERS   = 3
 TARGET_CONCURRENCY = 3
-MSG_DELAY = 0.1
-TARGET_DELAY = 0.15
-MAX_RETRIES = 3
+MSG_DELAY       = 0.1
+TARGET_DELAY    = 0.15
+MAX_RETRIES     = 3
 # ==========================================
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-message_queue = asyncio.Queue()
+message_queue  = asyncio.Queue()
 message_buffer = defaultdict(list)
-buffer_tasks = {}
+buffer_tasks   = {}
 
-# ✅ FIX: Track already-seen message IDs to prevent double forwarding
-# { chat_id: set of message_ids }
+# Dedup tracker
 seen_message_ids: dict[int, set] = defaultdict(set)
 
 _bot_client = None
@@ -33,11 +32,9 @@ active_userbots: dict[int, Client] = {}
 
 
 def _is_duplicate(chat_id: int, message_id: int) -> bool:
-    """Return True if this message was already added to buffer."""
     if message_id in seen_message_ids[chat_id]:
         return True
     seen_message_ids[chat_id].add(message_id)
-    # Keep set small — only last 500 message IDs per chat
     if len(seen_message_ids[chat_id]) > 500:
         seen_message_ids[chat_id] = set(list(seen_message_ids[chat_id])[-500:])
     return False
@@ -79,14 +76,9 @@ def _register_userbot_handler(ub: Client, user_id: int):
     async def userbot_forward_content(client, message):
         try:
             cid = message.chat.id
-
-            # ✅ DEDUP CHECK — skip if bot already added this message
             if _is_duplicate(cid, message.id):
-                logger.debug(f"Userbot skipping duplicate msg_id={message.id} chat={cid}")
                 return
-
             message_buffer[cid].append(message)
-
             old = buffer_tasks.get(cid)
             if old and not old.done():
                 try:
@@ -94,7 +86,6 @@ def _register_userbot_handler(ub: Client, user_id: int):
                     await asyncio.sleep(0)
                 except Exception:
                     pass
-
             buffer_tasks[cid] = asyncio.create_task(
                 process_buffered_messages(cid, source_client=client)
             )
@@ -109,7 +100,7 @@ async def restore_all_userbots():
     logger.info(f"Restoring {len(sessions)} userbot session(s)...")
     for doc in sessions:
         uid = doc.get("user_id")
-        ss = doc.get("session_string")
+        ss  = doc.get("session_string")
         if not uid or not ss:
             continue
         try:
@@ -146,15 +137,31 @@ async def handle_flood(func, **kwargs):
 
 
 # ================= SINGLE FORWARD =================
-async def forward_single_message(client, message, chat_id, sender_client=None):
+async def forward_single_message(client, message, chat_id, sender_client=None, caption_extra: str = ""):
     try:
         writer = sender_client if sender_client else client
-        await handle_flood(
-            writer.copy_message,
-            chat_id=chat_id,
-            from_chat_id=message.chat.id,
-            message_id=message.id,
-        )
+
+        # Add endtext to caption if present
+        extra_caption = None
+        if caption_extra:
+            existing = message.caption or message.text or ""
+            extra_caption = f"{existing}\n\n{caption_extra}".strip() if existing else caption_extra
+
+        if extra_caption:
+            await handle_flood(
+                writer.copy_message,
+                chat_id=chat_id,
+                from_chat_id=message.chat.id,
+                message_id=message.id,
+                caption=extra_caption,
+            )
+        else:
+            await handle_flood(
+                writer.copy_message,
+                chat_id=chat_id,
+                from_chat_id=message.chat.id,
+                message_id=message.id,
+            )
         return True
     except Exception:
         logger.exception(f"Forward failed msg_id={getattr(message, 'id', None)} -> {chat_id}")
@@ -173,16 +180,19 @@ async def forward_single_message(client, message, chat_id, sender_client=None):
 
 
 # ================= BUFFER FORWARD =================
-async def forward_buffered_messages(client, messages, chat_id, sender_client=None):
+async def forward_buffered_messages(client, messages, chat_id, sender_client=None,
+                                     msg_delay: float = MSG_DELAY, caption_extra: str = ""):
     success = 0
     for msg in sorted(messages, key=lambda m: m.id):
         try:
-            ok = await forward_single_message(client, msg, chat_id, sender_client=sender_client)
+            ok = await forward_single_message(client, msg, chat_id,
+                                              sender_client=sender_client,
+                                              caption_extra=caption_extra)
             if ok:
                 success += 1
         except Exception:
             logger.exception(f"Error forwarding buffered msg -> {chat_id}")
-        await asyncio.sleep(MSG_DELAY)
+        await asyncio.sleep(msg_delay)
     return success
 
 
@@ -192,23 +202,39 @@ async def process_queue(client):
 
     sem = asyncio.Semaphore(TARGET_CONCURRENCY)
 
-    async def forward_target(chat_id, payload, ftype, sender_client):
+    async def forward_target(chat_id, payload, ftype, sender_client, msg_delay, caption_extra):
         async with sem:
             if ftype == "buffered":
-                return await forward_buffered_messages(client, payload, chat_id, sender_client=sender_client)
-            return await forward_single_message(client, payload, chat_id, sender_client=sender_client)
+                return await forward_buffered_messages(
+                    client, payload, chat_id,
+                    sender_client=sender_client,
+                    msg_delay=msg_delay,
+                    caption_extra=caption_extra
+                )
+            return await forward_single_message(
+                client, payload, chat_id,
+                sender_client=sender_client,
+                caption_extra=caption_extra
+            )
 
     while True:
         try:
             payload, targets, ftype, retry_count, sender_client, source_info = await message_queue.get()
-            failed = []
+
+            user_id      = source_info.get("user_id")
+            msg_delay    = source_info.get("delay", MSG_DELAY)
+            caption_extra = source_info.get("endtext", "") or ""
+            failed    = []
             succeeded = []
 
-            tasks = [forward_target(tid, payload, ftype, sender_client) for tid in targets]
+            tasks = [
+                forward_target(tid, payload, ftype, sender_client, msg_delay, caption_extra)
+                for tid in targets
+            ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            msg_count = len(payload) if isinstance(payload, list) else 1
-            source_id = source_info.get("id", 0)
+            msg_count    = len(payload) if isinstance(payload, list) else 1
+            source_id    = source_info.get("id", 0)
             source_title = source_info.get("title", str(source_id))
 
             for tid, res in zip(targets, results):
@@ -220,6 +246,13 @@ async def process_queue(client):
                 else:
                     succeeded.append(tid)
 
+            # Update stats
+            if succeeded and user_id:
+                try:
+                    await database.increment_forward_count(user_id, len(succeeded) * msg_count)
+                except Exception:
+                    pass
+
             for tid in succeeded:
                 try:
                     await log_forward_success(client, source_title, source_id, tid, msg_count)
@@ -229,11 +262,9 @@ async def process_queue(client):
             if failed:
                 failed_tids = [f[0] for f in failed]
                 if retry_count < MAX_RETRIES:
-                    logger.info(f"Retrying {len(failed_tids)} targets (attempt {retry_count + 1}/{MAX_RETRIES})")
                     await message_queue.put((payload, failed_tids, ftype, retry_count + 1,
                                             sender_client, source_info))
                 else:
-                    logger.error(f"Giving up on {len(failed_tids)} targets: {failed_tids}")
                     for tid, err in failed:
                         try:
                             await log_forward_failed(client, source_id, tid, msg_count, err)
@@ -244,7 +275,6 @@ async def process_queue(client):
             await asyncio.sleep(TARGET_DELAY)
 
         except asyncio.CancelledError:
-            logger.info("Queue worker cancelled")
             raise
         except Exception:
             logger.exception("Unexpected error in queue worker — continuing")
@@ -272,8 +302,7 @@ async def worker_watchdog(client):
 async def start_processor(client):
     tasks = {}
     for i in range(QUEUE_WORKERS):
-        t = asyncio.create_task(process_queue(client))
-        tasks[f"worker_{i}"] = t
+        tasks[f"worker_{i}"] = asyncio.create_task(process_queue(client))
     tasks["watchdog"] = asyncio.create_task(worker_watchdog(client))
     logger.info(f"{QUEUE_WORKERS} queue workers + watchdog started")
     return tasks
@@ -293,7 +322,7 @@ async def stop_forwarder(client, timeout: float = 5.0):
     try:
         await asyncio.wait_for(message_queue.join(), timeout=timeout)
     except Exception:
-        logger.info("Shutdown: queue join timeout or interrupted")
+        pass
     await stop_all_userbots()
     client._queue_tasks = {}
 
@@ -307,7 +336,7 @@ async def process_buffered_messages(source_chat_id, source_client=None):
         if not messages:
             return
 
-        # Deduplicate messages list by message ID (extra safety)
+        # Deduplicate
         seen = set()
         unique_messages = []
         for m in messages:
@@ -324,15 +353,36 @@ async def process_buffered_messages(source_chat_id, source_client=None):
         except Exception:
             pass
 
-        source_info = {"id": source_chat_id, "title": source_title}
-
         mappings = await database.get_all_targets_for_source(source_chat_id)
         for mapping in mappings:
             targets = mapping.get("target_ids", [])
             user_id = mapping.get("user_id")
-
             if not targets:
                 continue
+
+            # ── Check forwarding enabled ──
+            if user_id and not await database.is_forwarding_enabled(user_id):
+                logger.info(f"Forwarding OFF for user {user_id}, skipping")
+                continue
+
+            # ── Keyword filter ──
+            user_filters = await database.get_filters(user_id) if user_id else []
+            if user_filters:
+                filtered_messages = []
+                for msg in messages:
+                    text = (msg.text or msg.caption or "").lower()
+                    if any(w in text for w in user_filters):
+                        filtered_messages.append(msg)
+                if not filtered_messages:
+                    logger.info(f"All messages filtered out for user {user_id}")
+                    continue
+                messages_to_send = filtered_messages
+            else:
+                messages_to_send = messages
+
+            # ── Get per-user settings ──
+            msg_delay = await database.get_delay(user_id) if user_id else MSG_DELAY
+            endtext   = await database.get_endtext(user_id) if user_id else None
 
             sender = source_client
             if user_id and user_id in active_userbots:
@@ -340,11 +390,18 @@ async def process_buffered_messages(source_chat_id, source_client=None):
                 if ub.is_connected:
                     sender = ub
 
-            await message_queue.put((messages.copy(), targets, "buffered", 0, sender, source_info))
-            logger.info(f"Queued {len(messages)} msgs from {source_chat_id} -> {len(targets)} targets")
+            source_info = {
+                "id": source_chat_id,
+                "title": source_title,
+                "user_id": user_id,
+                "delay": msg_delay,
+                "endtext": endtext or "",
+            }
+
+            await message_queue.put((messages_to_send.copy(), targets, "buffered", 0, sender, source_info))
+            logger.info(f"Queued {len(messages_to_send)} msgs from {source_chat_id} -> {len(targets)} targets")
 
     except asyncio.CancelledError:
-        logger.debug(f"Buffer task for {source_chat_id} cancelled")
         raise
     except Exception:
         logger.exception("Unexpected error in buffer processor")
@@ -362,17 +419,11 @@ async def process_buffered_messages(source_chat_id, source_client=None):
      filters.poll | filters.location | filters.contact)
 )
 async def forward_content(client, message):
-    """Bot listens to channels where it is admin/member."""
     try:
         cid = message.chat.id
-
-        # ✅ DEDUP CHECK — skip if userbot already added this message
         if _is_duplicate(cid, message.id):
-            logger.debug(f"Bot skipping duplicate msg_id={message.id} chat={cid}")
             return
-
         message_buffer[cid].append(message)
-
         old = buffer_tasks.get(cid)
         if old and not old.done():
             try:
@@ -380,7 +431,6 @@ async def forward_content(client, message):
                 await asyncio.sleep(0)
             except Exception:
                 pass
-
         buffer_tasks[cid] = asyncio.create_task(
             process_buffered_messages(cid, source_client=client)
         )
