@@ -531,8 +531,8 @@ async def cmd_login(client, message: Message):
     existing = await database.get_userbot_session(user_id)
     if existing:
         return await message.reply_text(
-            f"<b>✅ Already logged in!</b>\n\n📱 <code>{existing.get('phone','N/A')}</code>\n"
-            f"🕐 {existing.get('created_at','N/A')}\n\n/logout | /session",
+            f"<b>✅ You're already logged in! 🎉</b>\n\n📱 Phone: <code>{existing.get('phone','N/A')}</code>\n"
+            f"🕐 Login: {existing.get('created_at','N/A')}\n\n/To switch accounts, first use /logout | /session",
             parse_mode=enums.ParseMode.HTML
         )
     login_states[user_id] = {"step": "phone"}
@@ -577,8 +577,8 @@ async def cmd_session(client, message: Message):
     ub     = active_userbots.get(user_id)
     status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
     await message.reply_text(
-        f"<b>📋 Session Info</b>\n\n👤 {status}\n📱 <code>{session.get('phone','N/A')}</code>\n"
-        f"🕐 {session.get('created_at','N/A')}\n\n/logout",
+        f"<b>📋 Session Info</b>\n\n👤 Status: {status}\n📱 Phone: <code>{session.get('phone','N/A')}</code>\n"
+        f"🕐 Login: {session.get('created_at','N/A')}\n\n/logout",
         parse_mode=enums.ParseMode.HTML
     )
 
