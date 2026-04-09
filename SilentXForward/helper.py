@@ -532,7 +532,7 @@ async def cmd_login(client, message: Message):
     if existing:
         return await message.reply_text(
             f"<b>✅ You're already logged in! 🎉</b>\n\n📱 Phone: <code>{existing.get('phone','N/A')}</code>\n"
-            f"🕐 Login: {existing.get('created_at','N/A')}\n\n/To switch accounts, first use /logout | /session",
+            f"🕐 Login: {existing.get('created_at','N/A')}\n\nTo switch accounts, first use /logout | /session",
             parse_mode=enums.ParseMode.HTML
         )
     login_states[user_id] = {"step": "phone"}
@@ -620,7 +620,13 @@ async def login_step_handler(client, message: Message):
     # ── Phone ──────────────────────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
-        msg   = await message.reply_text("⏳ <b>Sending OTP...</b>", parse_mode=enums.ParseMode.HTML)
+        msg   = await message.reply_text("<b>"🔄 Connecting •••",
+    "🔄 Connecting ••○",
+    "🔄 Connecting •○○",
+    "🔄 Connecting ○○○",
+    "🔄 Connecting ○○•",
+    "🔄 Connecting ○••",
+    "🔄 Connecting •••"</b>", parse_mode=enums.ParseMode.HTML)
         import config as cfg
         temp_client = Client(f"temp_{user_id}", api_id=cfg.API_ID, api_hash=cfg.API_HASH, in_memory=True)
         try:
