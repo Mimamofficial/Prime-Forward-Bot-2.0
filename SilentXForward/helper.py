@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from SilentXForward import database
 from SilentXForward.logger import (
@@ -506,10 +507,10 @@ async def list_mappings(client, message: Message):
                 try:
                     tc = await smart_get_chat(client, tid, user_id)
                     text += f"   • {tc.title} (<code>{tid}</code>)\n"
-                except:
+                except Exception:
                     text += f"   • <code>{tid}</code>\n"
             text += "\n"
-        except:
+        except Exception:
             text += f"<b>{idx}.</b> <code>{source_id}</code> — {len(target_ids)} target(s)\n\n"
     text += f"<b>Total Sources:</b> {len(mappings)}"
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
@@ -620,20 +621,31 @@ async def login_step_handler(client, message: Message):
     # ── Phone ──────────────────────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
-        msg   = await message.reply_text("<b>"🔄 Connecting •••",
-    "🔄 Connecting ••○",
-    "🔄 Connecting •○○",
-    "🔄 Connecting ○○○",
-    "🔄 Connecting ○○•",
-    "🔄 Connecting ○••",
-    "🔄 Connecting •••"</b>", parse_mode=enums.ParseMode.HTML)
+        msg   = await message.reply_text("🔄 <b>Connecting •••</b>", parse_mode=enums.ParseMode.HTML)
+
+        frames = [
+            "🔄 <b>Connecting •••</b>",
+            "🔄 <b>Connecting ••○</b>",
+            "🔄 <b>Connecting •○○</b>",
+            "🔄 <b>Connecting ○○○</b>",
+            "🔄 <b>Connecting ○○•</b>",
+            "🔄 <b>Connecting ○••</b>",
+            "🔄 <b>Connecting •••</b>",
+        ]
+        for frame in frames:
+            try:
+                await msg.edit(frame, parse_mode=enums.ParseMode.HTML)
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
+
         import config as cfg
         temp_client = Client(f"temp_{user_id}", api_id=cfg.API_ID, api_hash=cfg.API_HASH, in_memory=True)
         try:
             await temp_client.connect()
             sent = await temp_client.send_code(phone)
-            state.update({"step":"otp","phone":phone,
-                          "phone_code_hash":sent.phone_code_hash,"temp_client":temp_client})
+            state.update({"step": "otp", "phone": phone,
+                          "phone_code_hash": sent.phone_code_hash, "temp_client": temp_client})
             login_states[user_id] = state
             await msg.edit(
                 "📩 <b>OTP Sent to your app! 📱</b>\n\n"
@@ -660,7 +672,7 @@ async def login_step_handler(client, message: Message):
 
     # ── OTP ────────────────────────────────────────────────────────────────
     elif step == "otp":
-        otp = message.text.strip().replace(" ","")
+        otp = message.text.strip().replace(" ", "")
         temp_client = state.get("temp_client")
         try:
             await temp_client.sign_in(state["phone"], state["phone_code_hash"], otp)
