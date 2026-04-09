@@ -537,7 +537,12 @@ async def cmd_login(client, message: Message):
         )
     login_states[user_id] = {"step": "phone"}
     await message.reply_text(
-        "<b>🔑 Userbot Login</b>\n\nPhone number bhejein.\nFormat: <code>+919876543210</code>\n\n❌ /cancel",
+        "👋 <b>Hey! Let's log you in smoothly 🌟</b>\n\n"
+        "<i>Progress: 🟢 Phone Number → 🔵 Code → 🔵 Password</i>\n\n"
+        "📞 Please send your <b>Telegram Phone Number</b> with country code.\n\n"
+        "<blockquote>Example: <code>+919876543210</code></blockquote>\n\n"
+        "💡 <i>Your number is used only for verification and is kept secure. 🔒</i>\n\n"
+        "❌ Tap the <b>Cancel</b> button or send /cancel to stop.",
         parse_mode=enums.ParseMode.HTML
     )
 
@@ -615,7 +620,7 @@ async def login_step_handler(client, message: Message):
     # ── Phone ──────────────────────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
-        msg   = await message.reply_text("⏳ OTP bhej raha hoon...")
+        msg   = await message.reply_text("⏳ <b>Sending OTP...</b>", parse_mode=enums.ParseMode.HTML)
         import config as cfg
         temp_client = Client(f"temp_{user_id}", api_id=cfg.API_ID, api_hash=cfg.API_HASH, in_memory=True)
         try:
@@ -624,13 +629,24 @@ async def login_step_handler(client, message: Message):
             state.update({"step":"otp","phone":phone,
                           "phone_code_hash":sent.phone_code_hash,"temp_client":temp_client})
             login_states[user_id] = state
-            await msg.edit("<b>📩 OTP bheja!</b>\n\nFormat: <code>1 2 3 4 5</code>\n\n❌ /cancel",
-                           parse_mode=enums.ParseMode.HTML)
+            await msg.edit(
+                "📩 <b>OTP Sent to your app! 📱</b>\n\n"
+                "<i>Progress: ✅ Phone Number → 🟢 Code → 🔵 Password</i>\n\n"
+                "Please open your Telegram app and copy the verification code.\n\n"
+                "<b>Send it like this:</b> 12 345 or 1 2 3 4 5 6\n\n"
+                "<blockquote>Adding spaces helps prevent Telegram from deleting the message automatically. 💡</blockquote>",
+                parse_mode=enums.ParseMode.HTML
+            )
         except PhoneNumberInvalid:
             await temp_client.disconnect()
             del login_states[user_id]
-            await msg.edit("<b>❌ Invalid number!</b>\nFormat: <code>+919876543210</code>",
-                           parse_mode=enums.ParseMode.HTML)
+            await msg.edit(
+                "❌ <b>Invalid Phone Number!</b>\n\n"
+                "<i>Progress: 🔴 Phone Number → 🔵 Code → 🔵 Password</i>\n\n"
+                "Please send a valid number with country code.\n"
+                "<blockquote>Example: <code>+919876543210</code></blockquote>",
+                parse_mode=enums.ParseMode.HTML
+            )
         except Exception as e:
             await temp_client.disconnect()
             del login_states[user_id]
@@ -650,22 +666,40 @@ async def login_step_handler(client, message: Message):
             await start_single_userbot(user_id, ss)
             await log_login(client, message.from_user, state["phone"])
             await message.reply_text(
-                "<b>✅ Login Successful!</b>\n\n🤖 Userbot started!\n\n"
-                "<b>⚠️ Important:</b> Apne account se <b>source/target channels ek baar kholo</b> "
-                "phir /set karo.\n\n📋 /session | 🚪 /logout",
+                "🎉 <b>Login Successful! 🌟</b>\n\n"
+                "<i>Progress: ✅ Phone Number → ✅ Code → ✅ Password</i>\n\n"
+                "Your session has been saved securely. 🔒\n\n"
+                "You can now use all features! 🚀\n\n"
+                "<b>⚠️ Important:</b> Apne account se <b>source/target channels ek baar kholo</b> phir /set karo.\n\n"
+                "📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
         except PhoneCodeInvalid:
-            await message.reply_text("<b>❌ Galat OTP!</b>", parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(
+                "❌ <b>Wrong OTP!</b>\n\n"
+                "<i>Progress: ✅ Phone Number → 🔴 Code → 🔵 Password</i>\n\n"
+                "Please check the code and try again.",
+                parse_mode=enums.ParseMode.HTML
+            )
         except PhoneCodeExpired:
             await temp_client.disconnect()
             del login_states[user_id]
-            await message.reply_text("<b>⏰ OTP expire!</b> Dobara /login.", parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(
+                "⏰ <b>OTP Expired!</b>\n\n"
+                "<i>Progress: ✅ Phone Number → 🔴 Code → 🔵 Password</i>\n\n"
+                "Please start again with /login.",
+                parse_mode=enums.ParseMode.HTML
+            )
         except SessionPasswordNeeded:
             state["step"] = "password"
             login_states[user_id] = state
-            await message.reply_text("<b>🔐 2FA Password bhejein:</b>\n\n❌ /cancel",
-                                     parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(
+                "🔒 <b>Two-Step Verification Detected 🔒</b>\n\n"
+                "<i>Progress: ✅ Phone Number → ✅ Code → 🟢 Password</i>\n\n"
+                "Please enter your account <b>password</b>.\n\n"
+                "<i>Take your time — it's secure! 🛡️</i>",
+                parse_mode=enums.ParseMode.HTML
+            )
         except Exception as e:
             try:
                 await temp_client.disconnect()
@@ -687,11 +721,21 @@ async def login_step_handler(client, message: Message):
             await start_single_userbot(user_id, ss)
             await log_login(client, message.from_user, state["phone"])
             await message.reply_text(
-                "<b>✅ Login Successful! (2FA)</b>\n\n🤖 Userbot started!\n\n📋 /session | 🚪 /logout",
+                "🎉 <b>Login Successful! 🌟</b>\n\n"
+                "<i>Progress: ✅ Phone Number → ✅ Code → ✅ Password</i>\n\n"
+                "Your session has been saved securely. 🔒\n\n"
+                "You can now use all features! 🚀\n\n"
+                "<b>⚠️ Important:</b> Apne account se <b>source/target channels ek baar kholo</b> phir /set karo.\n\n"
+                "📋 /session | 🚪 /logout",
                 parse_mode=enums.ParseMode.HTML
             )
         except PasswordHashInvalid:
-            await message.reply_text("<b>❌ Galat password!</b>", parse_mode=enums.ParseMode.HTML)
+            await message.reply_text(
+                "❌ <b>Wrong Password!</b>\n\n"
+                "<i>Progress: ✅ Phone Number → ✅ Code → 🔴 Password</i>\n\n"
+                "Please enter the correct password.",
+                parse_mode=enums.ParseMode.HTML
+            )
         except Exception as e:
             try:
                 await temp_client.disconnect()
