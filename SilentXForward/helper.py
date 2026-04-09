@@ -620,25 +620,13 @@ async def login_step_handler(client, message: Message):
     # ── Phone ──────────────────────────────────────────────────────────────
     if step == "phone":
         phone = message.text.strip()
-        msg   = await message.reply_text("🔄 <b>Connecting •••</b>", parse_mode=enums.ParseMode.HTML)
- 
-        # ✅ Animated connecting effect
-        frames = [
-            "🔄 <b>Connecting •••</b>",
-            "🔄 <b>Connecting ••○</b>",
-            "🔄 <b>Connecting •○○</b>",
-            "🔄 <b>Connecting ○○○</b>",
-            "🔄 <b>Connecting ○○•</b>",
-            "🔄 <b>Connecting ○••</b>",
-            "🔄 <b>Connecting •••</b>",
-        ]
-        for frame in frames:
-            try:
-                await msg.edit(frame, parse_mode=enums.ParseMode.HTML)
-                await asyncio.sleep(0.3)
-            except Exception:
-                pass
- 
+        msg   = await message.reply_text("<b>"🔄 Connecting •••",
+    "🔄 Connecting ••○",
+    "🔄 Connecting •○○",
+    "🔄 Connecting ○○○",
+    "🔄 Connecting ○○•",
+    "🔄 Connecting ○••",
+    "🔄 Connecting •••"</b>", parse_mode=enums.ParseMode.HTML)
         import config as cfg
         temp_client = Client(f"temp_{user_id}", api_id=cfg.API_ID, api_hash=cfg.API_HASH, in_memory=True)
         try:
