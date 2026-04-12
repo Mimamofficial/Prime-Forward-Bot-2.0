@@ -661,7 +661,7 @@ async def cmd_session(client, message: Message):
         f"👤 Status: {status}\n"
         f"📱 Phone: {session.get('phone','N/A')}\n"
         f"🕐 Login: {session.get('created_at','N/A')}\n\n"
-        f"/logout",
+        f"To switch accounts, first use /logout | /session",
         parse_mode=enums.ParseMode.HTML
     )
 
