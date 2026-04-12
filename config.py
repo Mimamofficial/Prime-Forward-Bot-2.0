@@ -19,4 +19,8 @@ APP_URL = os.environ.get("APP_URL", None)
 
 # Log Channel ID — Yahan saare events log honge
 # Example: -1001234567890
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1002338165303")) or None
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) or None
+
+# Owner ID — Sirf yeh user admin commands use kar sakta hai
+# Example: 123456789
+OWNER_ID = int(os.environ.get("OWNER_ID", "0")) or None
