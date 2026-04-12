@@ -19,26 +19,26 @@ logger = logging.getLogger(__name__)
 
 START_IMAGE = "https://files.catbox.moe/x4fufo.jpg"
 
-START_TEXT = """<b>🎬 Prime Forward Bot
+START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
 
-<i>Your Ultimate Auto Forwarding System 🚀</i>
+Auto forward videos & files from any private channel to your channel — without "Forwarded From" tag!
 
-━━━━━━━━━━━━━━━
-⚡ Smart Features:
-• Multi Source ➜ Multi Target
-• Auto Video / File Forward
-• Private Channel Support 🔐
-• Fast • Secure • Reliable
-
+⚡ Features:
+✅ Private Channel Support 🔐
+✅ Multi Source → Multi Target
+✅ All Media Types Forward
+✅ Custom Delay & Filters
+✅ Footer Text Support
+✅ Login with your account
+✅ Fast • Secure • Reliable
 ━━━━━━━━━━━━━━━
 🎯 Get Started:
 ➤ /login (for private access)
 ➤ /set source target
 ➤ Sit back & enjoy automation 😎
 
-<blockquote>👨‍💻 Maintained by <a href="https://t.me/Mrn_Officialx">Mrn Official</a></blockquote>
-
-🔥 Experience Next Level Forwarding</b>
+🔥 Experience Next Level Forwarding
+<blockquote>👨‍💻 Maintained by <a href="https://t.me/Dark_of_Danger">𝄟͢🦋⃟≛⃝ 𝐃𝐚𝐫𝐤 𝐨𝐟 𝐃𝐚𝐧𝐠𝐞𝐫 𝄟⃝❤</a></blockquote></b>
 """
 
 HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
