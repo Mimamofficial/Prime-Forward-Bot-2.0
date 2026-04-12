@@ -600,8 +600,10 @@ async def cmd_login(client, message: Message):
     existing = await database.get_userbot_session(user_id)
     if existing:
         return await message.reply_text(
-            f"<b>✅ Already logged in!</b>\n\n📱 <code>{existing.get('phone','N/A')}</code>\n"
-            f"🕐 {existing.get('created_at','N/A')}\n\n/logout | /session",
+            f"✅ <b>You're already logged in! 🎉</b>\n\n"
+            f"📱 Phone: {existing.get('phone','N/A')}\n"
+            f"🕐 Login: {existing.get('created_at','N/A')}\n\n"
+            f"To switch accounts, first use /logout | /session",
             parse_mode=enums.ParseMode.HTML
         )
     login_states[user_id] = {"step": "phone"}
@@ -629,9 +631,17 @@ async def cmd_logout(client, message: Message):
     deleted = await database.delete_userbot_session(user_id)
     if deleted:
         await log_logout(client, message.from_user)
-        await message.reply_text("<b>✅ Logged out!</b>", parse_mode=enums.ParseMode.HTML)
+        await message.reply_text(
+            "🚪 <b>Logout Successful! 👋</b>\n\n"
+            "<i>Your session has been cleared. You can log in again anytime! 🔄</i>",
+            parse_mode=enums.ParseMode.HTML
+        )
     else:
-        await message.reply_text("<b>⚠️ Already logged out.</b>", parse_mode=enums.ParseMode.HTML)
+        await message.reply_text(
+            "⚠️ <b>No Active Session!</b>\n\n"
+            "<i>You are not logged in. Use /login to connect your account.</i>",
+            parse_mode=enums.ParseMode.HTML
+        )
 
 @Client.on_message(filters.command("session") & filters.private)
 async def cmd_session(client, message: Message):
@@ -639,15 +649,19 @@ async def cmd_session(client, message: Message):
     session = await database.get_userbot_session(user_id)
     if not session:
         return await message.reply_text(
-            "<b>❌ No active session.</b>\n\n/login se connect karein.",
+            "❌ <b>No Active Session!</b>\n\n"
+            "<i>You are not logged in yet. Use /login to connect your Telegram account.</i>",
             parse_mode=enums.ParseMode.HTML
         )
     from SilentXForward.forward import active_userbots
     ub     = active_userbots.get(user_id)
     status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
     await message.reply_text(
-        f"<b>📋 Session Info</b>\n\n👤 {status}\n📱 <code>{session.get('phone','N/A')}</code>\n"
-        f"🕐 {session.get('created_at','N/A')}\n\n/logout",
+        f"📋 <b>Session Info</b>\n\n"
+        f"👤 Status: {status}\n"
+        f"📱 Phone: {session.get('phone','N/A')}\n"
+        f"🕐 Login: {session.get('created_at','N/A')}\n\n"
+        f"/logout",
         parse_mode=enums.ParseMode.HTML
     )
 
