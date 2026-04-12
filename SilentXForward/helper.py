@@ -11,6 +11,7 @@ from pyrogram.errors import (
     PhoneNumberInvalid, PhoneCodeInvalid, PhoneCodeExpired,
     SessionPasswordNeeded, PasswordHashInvalid, PeerIdInvalid,
 )
+import config as cfg
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -94,6 +95,21 @@ BUTTONS = InlineKeyboardMarkup([[
 ]])
 
 login_states = {}
+
+
+# ==================== OWNER CHECK ====================
+
+def owner_only(func):
+    """Decorator — sirf OWNER_ID wala user use kar sakta hai."""
+    async def wrapper(client, message: Message):
+        if cfg.OWNER_ID and message.from_user.id != cfg.OWNER_ID:
+            return await message.reply_text(
+                "🚫 <b>Access Denied!</b>\n\nYeh command sirf bot owner use kar sakta hai.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        return await func(client, message)
+    wrapper.__name__ = func.__name__
+    return wrapper
 
 
 # ==================== HELPERS ====================
@@ -326,6 +342,7 @@ async def cmd_resetcount(client, message: Message):
 # ==================== ADMIN SYSTEM ====================
 
 @Client.on_message(filters.command("addadmin") & filters.private)
+@owner_only
 async def cmd_addadmin(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -341,6 +358,7 @@ async def cmd_addadmin(client, message: Message):
         await message.reply_text("<b>❌ Valid user_id do.</b>", parse_mode=enums.ParseMode.HTML)
 
 @Client.on_message(filters.command("removeuser") & filters.private)
+@owner_only
 async def cmd_removeuser(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -359,6 +377,7 @@ async def cmd_removeuser(client, message: Message):
         await message.reply_text("<b>❌ Valid user_id do.</b>", parse_mode=enums.ParseMode.HTML)
 
 @Client.on_message(filters.command("ban") & filters.private)
+@owner_only
 async def cmd_ban(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -374,6 +393,7 @@ async def cmd_ban(client, message: Message):
         await message.reply_text("<b>❌ Valid user_id do.</b>", parse_mode=enums.ParseMode.HTML)
 
 @Client.on_message(filters.command("unban") & filters.private)
+@owner_only
 async def cmd_unban(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -507,10 +527,10 @@ async def list_mappings(client, message: Message):
                 try:
                     tc = await smart_get_chat(client, tid, user_id)
                     text += f"   • {tc.title} (<code>{tid}</code>)\n"
-                except Exception:
+                except:
                     text += f"   • <code>{tid}</code>\n"
             text += "\n"
-        except Exception:
+        except:
             text += f"<b>{idx}.</b> <code>{source_id}</code> — {len(target_ids)} target(s)\n\n"
     text += f"<b>Total Sources:</b> {len(mappings)}"
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
@@ -524,6 +544,54 @@ async def clear_all(client, message: Message):
         await message.reply_text("<b>❌ No mappings to clear!</b>", parse_mode=enums.ParseMode.HTML)
 
 
+# ==================== BROADCAST ====================
+
+@Client.on_message(filters.command("broadcast") & filters.private)
+@owner_only
+async def cmd_broadcast(client, message: Message):
+    # Message must be a reply OR have text after command
+    if not message.reply_to_message and len(message.command) < 2:
+        return await message.reply_text(
+            "<b>📢 Broadcast Usage:</b>\n\n"
+            "1. Koi message reply karke: <code>/broadcast</code>\n"
+            "2. Ya seedha: <code>/broadcast Hello everyone!</code>\n\n"
+            "<i>Sabhi bot users ko message jayega.</i>",
+            parse_mode=enums.ParseMode.HTML
+        )
+
+    status_msg = await message.reply_text("📢 <b>Broadcasting...</b>", parse_mode=enums.ParseMode.HTML)
+
+    # Get all unique user IDs from database
+    all_sessions = await database.get_all_userbot_sessions()
+    user_ids = list({doc["user_id"] for doc in all_sessions if doc.get("user_id")})
+
+    if not user_ids:
+        return await status_msg.edit("<b>⚠️ Koi user nahi mila.</b>", parse_mode=enums.ParseMode.HTML)
+
+    success = 0
+    failed  = 0
+
+    for uid in user_ids:
+        try:
+            if message.reply_to_message:
+                await message.reply_to_message.copy(uid)
+            else:
+                text = message.text.split(None, 1)[1]
+                await client.send_message(uid, text, parse_mode=enums.ParseMode.HTML)
+            success += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.3)  # flood protection
+
+    await status_msg.edit(
+        f"<b>📢 Broadcast Complete!</b>\n\n"
+        f"✅ Sent: <b>{success}</b>\n"
+        f"❌ Failed: <b>{failed}</b>\n"
+        f"👥 Total: <b>{len(user_ids)}</b>",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+
 # ==================== USERBOT LOGIN ====================
 
 @Client.on_message(filters.command("login") & filters.private)
@@ -532,8 +600,8 @@ async def cmd_login(client, message: Message):
     existing = await database.get_userbot_session(user_id)
     if existing:
         return await message.reply_text(
-            f"<b>✅ You're already logged in! 🎉</b>\n\n📱 Phone: <code>{existing.get('phone','N/A')}</code>\n"
-            f"🕐 Login: {existing.get('created_at','N/A')}\n\nTo switch accounts, first use /logout | /session",
+            f"<b>✅ Already logged in!</b>\n\n📱 <code>{existing.get('phone','N/A')}</code>\n"
+            f"🕐 {existing.get('created_at','N/A')}\n\n/logout | /session",
             parse_mode=enums.ParseMode.HTML
         )
     login_states[user_id] = {"step": "phone"}
@@ -578,8 +646,8 @@ async def cmd_session(client, message: Message):
     ub     = active_userbots.get(user_id)
     status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
     await message.reply_text(
-        f"<b>📋 Session Info</b>\n\n👤 Status: {status}\n📱 Phone: <code>{session.get('phone','N/A')}</code>\n"
-        f"🕐 Login: {session.get('created_at','N/A')}\n\n/logout",
+        f"<b>📋 Session Info</b>\n\n👤 {status}\n📱 <code>{session.get('phone','N/A')}</code>\n"
+        f"🕐 {session.get('created_at','N/A')}\n\n/logout",
         parse_mode=enums.ParseMode.HTML
     )
 
@@ -608,7 +676,8 @@ async def cmd_cancel(client, message: Message):
                       "on","off","resume","status","setdelay","skip",
                       "addfilter","remfilter","listfilters",
                       "endtext","remendtext","listendtext",
-                      "count","resetcount","addadmin","removeuser","ban","unban"])
+                      "count","resetcount","addadmin","removeuser","ban","unban",
+                      "broadcast"])
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
@@ -623,6 +692,7 @@ async def login_step_handler(client, message: Message):
         phone = message.text.strip()
         msg   = await message.reply_text("🔄 <b>Connecting •••</b>", parse_mode=enums.ParseMode.HTML)
 
+        # ✅ Animated connecting effect
         frames = [
             "🔄 <b>Connecting •••</b>",
             "🔄 <b>Connecting ••○</b>",
@@ -644,8 +714,8 @@ async def login_step_handler(client, message: Message):
         try:
             await temp_client.connect()
             sent = await temp_client.send_code(phone)
-            state.update({"step": "otp", "phone": phone,
-                          "phone_code_hash": sent.phone_code_hash, "temp_client": temp_client})
+            state.update({"step":"otp","phone":phone,
+                          "phone_code_hash":sent.phone_code_hash,"temp_client":temp_client})
             login_states[user_id] = state
             await msg.edit(
                 "📩 <b>OTP Sent to your app! 📱</b>\n\n"
@@ -672,7 +742,7 @@ async def login_step_handler(client, message: Message):
 
     # ── OTP ────────────────────────────────────────────────────────────────
     elif step == "otp":
-        otp = message.text.strip().replace(" ", "")
+        otp = message.text.strip().replace(" ","")
         temp_client = state.get("temp_client")
         try:
             await temp_client.sign_in(state["phone"], state["phone_code_hash"], otp)
