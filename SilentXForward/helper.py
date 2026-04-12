@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from SilentXForward import database
+from SilentXForward.fsub import check_fsub, send_fsub_message, fsub_verify_callback
 from SilentXForward.logger import (
     log_new_user, log_login, log_logout,
     log_source_added, log_source_removed, log_target_removed
@@ -142,6 +143,11 @@ async def smart_get_chat(client, chat_id, user_id):
 @Client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     try:
+        # ── Force Subscribe Check ──
+        not_joined = await check_fsub(client, message.from_user.id)
+        if not_joined:
+            return await send_fsub_message(client, message, not_joined)
+
         await log_new_user(client, message.from_user)
         await message.reply_photo(photo=START_IMAGE, caption=START_TEXT,
                                   parse_mode=enums.ParseMode.HTML, reply_markup=BUTTONS)
@@ -152,6 +158,12 @@ async def start_command(client, message):
                                 reply_markup=BUTTONS, disable_web_page_preview=True)
         except Exception:
             pass
+
+
+# ── Force Subscribe Verify Callback ──────────────────────────────────────────
+@Client.on_callback_query(filters.regex("^fsub_verify$"))
+async def fsub_verify(client, callback_query):
+    await fsub_verify_callback(client, callback_query)
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command(client, message):
@@ -597,6 +609,12 @@ async def cmd_broadcast(client, message: Message):
 @Client.on_message(filters.command("login") & filters.private)
 async def cmd_login(client, message: Message):
     user_id  = message.from_user.id
+
+    # ── Force Subscribe Check ──
+    not_joined = await check_fsub(client, user_id)
+    if not_joined:
+        return await send_fsub_message(client, message, not_joined)
+
     existing = await database.get_userbot_session(user_id)
     if existing:
         return await message.reply_text(
@@ -661,7 +679,7 @@ async def cmd_session(client, message: Message):
         f"👤 Status: {status}\n"
         f"📱 Phone: {session.get('phone','N/A')}\n"
         f"🕐 Login: {session.get('created_at','N/A')}\n\n"
-        f"To switch accounts, first use /logout | /session",
+        f"/logout",
         parse_mode=enums.ParseMode.HTML
     )
 
