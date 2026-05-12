@@ -23,15 +23,19 @@ START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
 
 Auto forward videos & files from any private channel to your channel — without "Forwarded From" tag!
 
-⚡ Features:
-✅ Private Channel Support 🔐
-✅ Multi Source → Multi Target
-✅ All Media Types Forward
-✅ Custom Delay & Filters
-✅ Footer Text Support
-✅ Login with your account
-✅ Fast • Secure • Reliable
-━━━━━━━━━━━━━━━
+🚀 Premium Auto Forwarder Features 🚀
+
+✨ Session Login → Direct Instant Forward
+✨ Without Login → Bot Admin Required
+✨ Userbot + Bot Dual Support
+✨ Unlimited Source & Target Support
+✨ Bulk / Album Auto Forward
+✨ Auto FloodWait Protection
+✨ No Duplicate Messages
+✨ Auto Retry + Auto Recovery
+✨ Super Fast & Stable Forwarding
+✨ Smooth & Professional System
+➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 🎯 Get Started:
 ➤ /login (for private access)
 ➤ /set source target
