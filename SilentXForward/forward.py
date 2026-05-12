@@ -7,7 +7,7 @@ from SilentXForward import database
 import config as cfg
 
 # ================= CONFIG =================
-BUFFER_DELAY    = 2
+BUFFER_DELAY    = 3      # Wait 3s after LAST message before forwarding
 QUEUE_WORKERS   = 3
 TARGET_CONCURRENCY = 3
 MSG_DELAY       = 0.1
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 message_queue  = asyncio.Queue()
 message_buffer = defaultdict(list)
 buffer_tasks   = {}
+buffer_timers  = {}   # ✅ NEW: tracks last message time per chat
 
 # Dedup tracker
 seen_message_ids: dict[int, set] = defaultdict(set)
@@ -78,14 +79,16 @@ def _register_userbot_handler(ub: Client, user_id: int):
             cid = message.chat.id
             if _is_duplicate(cid, message.id):
                 return
+
+            # ✅ FIX: Sirf message add karo — task cancel mat karo
             message_buffer[cid].append(message)
+
+            # Agar task already chal raha hai toh naya mat banao
             old = buffer_tasks.get(cid)
             if old and not old.done():
-                try:
-                    old.cancel()
-                    await asyncio.sleep(0)
-                except Exception:
-                    pass
+                return  # existing task hi process karega
+
+            # Naya task sirf tab banao jab koi task nahi hai
             buffer_tasks[cid] = asyncio.create_task(
                 process_buffered_messages(cid, source_client=client)
             )
@@ -346,14 +349,32 @@ async def stop_forwarder(client, timeout: float = 5.0):
 
 # ================= BUFFER PROCESSOR =================
 async def process_buffered_messages(source_chat_id, source_client=None):
+    """
+    ✅ DEBOUNCE FIX:
+    Jab tak naye messages aa rahe hain — wait karo.
+    Jab BUFFER_DELAY seconds tak koi naya message na aaye
+    tabhi saare collected messages forward karo.
+    Isse bulk messages mein koi bhi skip nahi hoga.
+    """
     try:
-        await asyncio.sleep(BUFFER_DELAY)
+        while True:
+            await asyncio.sleep(BUFFER_DELAY)
+            # Check: last message kitne time pehle aaya?
+            last_time = buffer_timers.get(source_chat_id, 0)
+            now = asyncio.get_event_loop().time()
+            if now - last_time < BUFFER_DELAY:
+                # Abhi bhi messages aa rahe hain — aur wait karo
+                continue
+            # Kaafi der se koi message nahi aaya — ab forward karo
+            break
 
         messages = message_buffer.pop(source_chat_id, None)
+        buffer_timers.pop(source_chat_id, None)
+
         if not messages:
             return
 
-        # Deduplicate
+        # Deduplicate by message ID
         seen = set()
         unique_messages = []
         for m in messages:
@@ -361,6 +382,8 @@ async def process_buffered_messages(source_chat_id, source_client=None):
                 seen.add(m.id)
                 unique_messages.append(m)
         messages = unique_messages
+
+        logger.info(f"Processing {len(messages)} buffered msgs from {source_chat_id}")
 
         source_title = str(source_chat_id)
         try:
@@ -416,12 +439,39 @@ async def process_buffered_messages(source_chat_id, source_client=None):
             logger.info(f"Queued {len(messages_to_send)} msgs from {source_chat_id} -> {len(targets)} targets")
 
     except asyncio.CancelledError:
+        # Messages buffer mein safe hain — lost nahi honge
+        logger.debug(f"Buffer task cancelled for {source_chat_id}")
         raise
     except Exception:
         logger.exception("Unexpected error in buffer processor")
         message_buffer.pop(source_chat_id, None)
+        buffer_timers.pop(source_chat_id, None)
     finally:
         buffer_tasks.pop(source_chat_id, None)
+
+
+def _handle_incoming_message(cid: int, message, source_client):
+    """
+    ✅ DEBOUNCE HELPER:
+    Har naye message pe:
+    1. Buffer mein add karo
+    2. Timer update karo (last message time)
+    3. Agar task already chal raha hai — rehne do (cancel mat karo!)
+    4. Agar task nahi hai ya khatam ho gaya — naya banao
+    """
+    message_buffer[cid].append(message)
+    # Timer update — last message time record karo
+    buffer_timers[cid] = asyncio.get_event_loop().time()
+
+    existing_task = buffer_tasks.get(cid)
+    if existing_task and not existing_task.done():
+        # Task chal raha hai — woh khud debounce loop mein wait karega
+        return
+
+    # Naya task banao
+    buffer_tasks[cid] = asyncio.create_task(
+        process_buffered_messages(cid, source_client=source_client)
+    )
 
 
 # ================= BOT MESSAGE LISTENER =================
@@ -437,16 +487,6 @@ async def forward_content(client, message):
         cid = message.chat.id
         if _is_duplicate(cid, message.id):
             return
-        message_buffer[cid].append(message)
-        old = buffer_tasks.get(cid)
-        if old and not old.done():
-            try:
-                old.cancel()
-                await asyncio.sleep(0)
-            except Exception:
-                pass
-        buffer_tasks[cid] = asyncio.create_task(
-            process_buffered_messages(cid, source_client=client)
-        )
+        _handle_incoming_message(cid, message, source_client=client)
     except Exception:
         logger.exception("Bot handler error")
