@@ -17,7 +17,7 @@ import config as cfg
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-START_IMAGE = "https://files.catbox.moe/x4fufo.jpg"
+START_IMAGE = "https://files.catbox.moe/oht30s.jpg"
 
 START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
 
