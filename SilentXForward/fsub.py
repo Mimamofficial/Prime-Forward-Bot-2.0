@@ -9,7 +9,7 @@ import logging
 from pyrogram import Client, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant, ChatAdminRequired, ChannelPrivate
-from config import FSUB_CHANNELS, OWNER_ID
+from config import FSUB_CHANNELS, OWNER_ID, FSUB_BANNER
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,6 @@ async def check_fsub(client: Client, user_id: int) -> list:
         except UserNotParticipant:
             not_joined.append(ch)
         except (ChatAdminRequired, ChannelPrivate):
-            # Can't check — skip this channel
             logger.warning(f"Cannot check membership for channel {ch['id']} — bot may not be admin")
         except Exception as e:
             logger.warning(f"FSUB check error for {ch['id']}: {e}")
@@ -49,7 +48,7 @@ async def check_fsub(client: Client, user_id: int) -> list:
 
 
 async def send_fsub_message(client, message, not_joined: list):
-    """Send the force subscribe message with join buttons."""
+    """Send the force subscribe message with banner image + join buttons."""
 
     # Build join buttons
     buttons = []
@@ -62,32 +61,40 @@ async def send_fsub_message(client, message, not_joined: list):
 
         link = ch.get("link")
         if not link:
-            # Try to get invite link
             try:
                 link = await client.export_chat_invite_link(ch["id"])
             except Exception:
                 link = "https://t.me"
 
-        buttons.append([InlineKeyboardButton(f"📢 Join {title}", url=link)])
+        buttons.append([InlineKeyboardButton(f"📢 JOIN {title}", url=link)])
 
-    # Add verify button
-    buttons.append([InlineKeyboardButton("✅ I've Joined — Verify", callback_data="fsub_verify")])
+    # Try Again button
+    buttons.append([InlineKeyboardButton("🔄 TRY AGAIN", callback_data="fsub_verify")])
 
     markup = InlineKeyboardMarkup(buttons)
 
-    total   = len(FSUB_CHANNELS)
-    pending = len(not_joined)
-    done    = total - pending
-
-    await message.reply_text(
-        f"👋 <b>Hey {message.from_user.first_name}!</b>\n\n"
-        f"⚠️ <b>Access Restricted!</b>\n\n"
-        f"To use this bot, you must join <b>{total}</b> channel(s) first.\n\n"
-        f"📊 Progress: <b>{done}/{total}</b> joined\n\n"
-        f"👇 <b>Join the channels below:</b>",
-        parse_mode=enums.ParseMode.HTML,
-        reply_markup=markup
+    caption = (
+        f"👋 <b>HELLO {message.from_user.first_name.upper()}!</b>\n\n"
+        f"⚠️ <b>ACCESS DENIED</b>\n\n"
+        f"<b>DUE TO HIGH SERVER TRAFFIC, ONLY CHANNEL SUBSCRIBERS CAN USE "
+        f"THIS SYSTEM. PLEASE JOIN OUR UPDATES CHANNEL TO UNLOCK ALL FEATURES.</b>"
     )
+
+    if FSUB_BANNER:
+        # Send banner image with caption
+        await message.reply_photo(
+            photo=FSUB_BANNER,
+            caption=caption,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=markup
+        )
+    else:
+        # Fallback: text only (no banner set)
+        await message.reply_text(
+            caption,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=markup
+        )
 
 
 async def fsub_verify_callback(client, callback_query):
@@ -97,12 +104,10 @@ async def fsub_verify_callback(client, callback_query):
 
     if not not_joined:
         # All joined!
-        await callback_query.answer("✅ Verified! You can now use the bot.", show_alert=True)
+        await callback_query.answer("✅ Access Granted! You can now use the bot.", show_alert=True)
         await callback_query.message.delete()
     else:
-        total   = len(FSUB_CHANNELS)
         pending = len(not_joined)
-        done    = total - pending
 
         # Rebuild buttons for remaining channels
         buttons = []
@@ -120,19 +125,35 @@ async def fsub_verify_callback(client, callback_query):
                 except Exception:
                     link = "https://t.me"
 
-            buttons.append([InlineKeyboardButton(f"📢 Join {title}", url=link)])
+            buttons.append([InlineKeyboardButton(f"📢 JOIN {title}", url=link)])
 
-        buttons.append([InlineKeyboardButton("✅ I've Joined — Verify", callback_data="fsub_verify")])
+        buttons.append([InlineKeyboardButton("🔄 TRY AGAIN", callback_data="fsub_verify")])
 
         await callback_query.answer(
-            f"❌ Still {pending} channel(s) pending! Please join all.",
+            f"❌ Still {pending} channel(s) pending! Join all to get access.",
             show_alert=True
         )
-        await callback_query.message.edit_text(
-            f"👋 <b>Hey {callback_query.from_user.first_name}!</b>\n\n"
-            f"⚠️ <b>Still not joined all channels!</b>\n\n"
-            f"📊 Progress: <b>{done}/{total}</b> joined\n\n"
-            f"👇 <b>Join remaining channels:</b>",
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+
+        # Edit caption if photo message, else edit text
+        try:
+            await callback_query.message.edit_caption(
+                caption=(
+                    f"👋 <b>HELLO {callback_query.from_user.first_name.upper()}!</b>\n\n"
+                    f"⚠️ <b>ACCESS DENIED</b>\n\n"
+                    f"<b>DUE TO HIGH SERVER TRAFFIC, ONLY CHANNEL SUBSCRIBERS CAN USE "
+                    f"THIS SYSTEM. PLEASE JOIN OUR UPDATES CHANNEL TO UNLOCK ALL FEATURES.</b>"
+                ),
+                parse_mode=enums.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+        except Exception:
+            await callback_query.message.edit_text(
+                text=(
+                    f"👋 <b>HELLO {callback_query.from_user.first_name.upper()}!</b>\n\n"
+                    f"⚠️ <b>ACCESS DENIED</b>\n\n"
+                    f"<b>DUE TO HIGH SERVER TRAFFIC, ONLY CHANNEL SUBSCRIBERS CAN USE "
+                    f"THIS SYSTEM. PLEASE JOIN OUR UPDATES CHANNEL TO UNLOCK ALL FEATURES.</b>"
+                ),
+                parse_mode=enums.ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
