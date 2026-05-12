@@ -45,3 +45,8 @@ if _fsub_raw.strip():
                 "id": int(entry),
                 "link": None
             })
+
+# FSub Banner Image — URL ya Telegram file_id dalo
+# Example: "https://imgbb.com/yourimage.jpg"  ya  "AgACAgIxxxxx..."
+# Blank chhod do agar image nahi lagani: FSUB_BANNER = ""
+FSUB_BANNER = os.environ.get("FSUB_BANNER", "https://files.catbox.moe/uybezy.jpg")
