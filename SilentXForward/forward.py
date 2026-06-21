@@ -161,16 +161,28 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
         # ⚠️ IMPORTANT: cover bhi ek "thumbnail-class" resource hai — Telegram isko seedhe
         # file_id se reuse/resend nahi karne deta (MEDIA_EMPTY error deta hai).
         # Isliye pehle download karo, fresh local file ke roop mein upload karo.
+        #
+        # ⚠️ FILE_REFERENCE_EXPIRED FIX: buffer/queue delay ki wajah se purana file
+        # reference expire ho sakta hai. Isliye download se pehle message ko fresh
+        # refetch karo taaki naya valid reference mile. Agar phir bhi fail ho jaaye,
+        # poora forward crash hone ke bajaye normal copy_message pe fallback karo
+        # (cover ke bina sahi, lekin content miss nahi hona chahiye).
         cover = getattr(message.video, "cover", None) if message.video else None
         if cover:
-            cover_size = cover[-1] if isinstance(cover, list) else cover
             cover_path = None
             try:
+                fresh_message = await writer.get_messages(message.chat.id, message.id)
+                fresh_video = fresh_message.video if fresh_message else None
+                fresh_cover = getattr(fresh_video, "cover", None) if fresh_video else cover
+                cover_size = fresh_cover[-1] if isinstance(fresh_cover, list) else fresh_cover
+                video_file_id = fresh_video.file_id if fresh_video else message.video.file_id
+
                 cover_path = await writer.download_media(cover_size.file_id)
+
                 await handle_flood(
                     writer.send_video,
                     chat_id=chat_id,
-                    video=message.video.file_id,
+                    video=video_file_id,
                     cover=cover_path,
                     caption=extra_caption if extra_caption else message.caption,
                     duration=message.video.duration,
@@ -179,6 +191,11 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
                     supports_streaming=message.video.supports_streaming,
                 )
                 return True
+            except Exception:
+                logger.exception(
+                    f"Cover-preserving send failed for msg_id={message.id}, falling back to normal copy"
+                )
+                # Yahan return nahi karte — neeche normal copy_message flow chalega
             finally:
                 if cover_path:
                     try:
