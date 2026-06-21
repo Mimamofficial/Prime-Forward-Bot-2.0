@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections import defaultdict
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, RPCError, ChannelInvalid, ChannelPrivate, ChatAdminRequired
@@ -156,21 +157,34 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
         # copy_message naya `cover` field carry forward nahi karta (sirf thumb handle karta hai,
         # kyunki yeh field Telegram ne thumb se alag, recently add kiya hai).
         # Isliye explicitly send_video se cover preserve karo.
+        #
+        # ⚠️ IMPORTANT: cover bhi ek "thumbnail-class" resource hai — Telegram isko seedhe
+        # file_id se reuse/resend nahi karne deta (MEDIA_EMPTY error deta hai).
+        # Isliye pehle download karo, fresh local file ke roop mein upload karo.
         cover = getattr(message.video, "cover", None) if message.video else None
         if cover:
-            cover_file_id = cover[-1].file_id if isinstance(cover, list) else cover.file_id
-            await handle_flood(
-                writer.send_video,
-                chat_id=chat_id,
-                video=message.video.file_id,
-                cover=cover_file_id,
-                caption=extra_caption if extra_caption else message.caption,
-                duration=message.video.duration,
-                width=message.video.width,
-                height=message.video.height,
-                supports_streaming=message.video.supports_streaming,
-            )
-            return True
+            cover_size = cover[-1] if isinstance(cover, list) else cover
+            cover_path = None
+            try:
+                cover_path = await writer.download_media(cover_size.file_id)
+                await handle_flood(
+                    writer.send_video,
+                    chat_id=chat_id,
+                    video=message.video.file_id,
+                    cover=cover_path,
+                    caption=extra_caption if extra_caption else message.caption,
+                    duration=message.video.duration,
+                    width=message.video.width,
+                    height=message.video.height,
+                    supports_streaming=message.video.supports_streaming,
+                )
+                return True
+            finally:
+                if cover_path:
+                    try:
+                        os.remove(cover_path)
+                    except Exception:
+                        pass
 
         if extra_caption:
             await handle_flood(
