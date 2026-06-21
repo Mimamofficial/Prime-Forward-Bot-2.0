@@ -152,6 +152,26 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
             existing = message.caption or message.text or ""
             extra_caption = f"{existing}\n\n{caption_extra}".strip() if existing else caption_extra
 
+        # ✅ COVER FIX: agar video ka custom "cover" set hai, copy_message use mat karo —
+        # copy_message naya `cover` field carry forward nahi karta (sirf thumb handle karta hai,
+        # kyunki yeh field Telegram ne thumb se alag, recently add kiya hai).
+        # Isliye explicitly send_video se cover preserve karo.
+        cover = getattr(message.video, "cover", None) if message.video else None
+        if cover:
+            cover_file_id = cover[-1].file_id if isinstance(cover, list) else cover.file_id
+            await handle_flood(
+                writer.send_video,
+                chat_id=chat_id,
+                video=message.video.file_id,
+                cover=cover_file_id,
+                caption=extra_caption if extra_caption else message.caption,
+                duration=message.video.duration,
+                width=message.video.width,
+                height=message.video.height,
+                supports_streaming=message.video.supports_streaming,
+            )
+            return True
+
         if extra_caption:
             await handle_flood(
                 writer.copy_message,
