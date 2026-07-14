@@ -152,6 +152,30 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
             existing = message.caption or message.text or ""
             extra_caption = f"{existing}\n\n{caption_extra}".strip() if existing else caption_extra
 
+        # ✅ COVER FIX: agar video ka custom cover set hai, send_cached_media use karo
+        # copy_message cover field carry forward nahi karta.
+        # send_cached_media DreamXBotz style mein cover directly support karta hai —
+        # koi download/upload nahi, FILE_REFERENCE_EXPIRED ka koi chakkar nahi.
+        # Agar cover nahi hai ya send_cached_media fail ho jaaye — normal copy_message pe fallback.
+        cover = getattr(message.video, "cover", None) if message.video else None
+        if cover:
+            try:
+                await handle_flood(
+                    writer.send_cached_media,
+                    chat_id=chat_id,
+                    file_id=message.video.file_id,
+                    cover=cover,
+                    caption=extra_caption if extra_caption else message.caption,
+                    protect_content=False,
+                )
+                return True
+            except Exception:
+                logger.warning(
+                    f"send_cached_media with cover failed for msg_id={message.id}, "
+                    f"falling back to copy_message"
+                )
+                # Fallback — neeche copy_message chalega
+
         if extra_caption:
             await handle_flood(
                 writer.copy_message,
