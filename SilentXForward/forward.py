@@ -152,6 +152,14 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
             existing = message.caption or message.text or ""
             extra_caption = f"{existing}\n\n{caption_extra}".strip() if existing else caption_extra
 
+        # 🔍 TEMPORARY DEBUG — cover ki actual value log karo
+        if message.video:
+            logger.info(
+                f"DEBUG VIDEO msg_id={message.id} | "
+                f"cover={getattr(message.video, 'cover', 'ATTR_NOT_FOUND')} | "
+                f"thumbs={message.video.thumbs}"
+            )
+
         # ✅ COVER FIX: agar video ka custom cover set hai, send_cached_media use karo
         # copy_message cover field carry forward nahi karta.
         # send_cached_media DreamXBotz style mein cover directly support karta hai —
