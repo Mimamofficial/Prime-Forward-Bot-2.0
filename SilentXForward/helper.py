@@ -62,6 +62,15 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 ✍️ Footer:
 /endtext [Text] | /remendtext | /listendtext
 
+📝 Caption (variables):
+/setcaption [Template] | /showcaption | /delcaption
+
+🔁 Replace Words:
+/addreplace Old:New | /remreplace Old | /listreplace | /clearreplace
+
+🧹 Remove Words:
+/addremoveword Word | /remremoveword Word | /listremovewords | /clearremovewords
+
 📊 Management:
 /set &lt;source&gt; &lt;target&gt; | /remove_target | /remove_source | /list | /clear
 
@@ -264,6 +273,9 @@ async def cmd_status(client, message: Message):
     delay    = settings.get("delay", 0.1)
     endtext  = settings.get("endtext", "Not set")
     fil_list = settings.get("filters", [])
+    cap_tpl  = settings.get("caption_template")
+    repl_cnt = len(settings.get("replacements", []))
+    rmw_cnt  = len(settings.get("remove_words", []))
 
     from SilentXForward.forward import active_userbots
     ub = active_userbots.get(user_id)
@@ -277,7 +289,10 @@ async def cmd_status(client, message: Message):
         f"📊 Total Forwarded: <b>{count}</b>\n"
         f"🗂️ Sources: <b>{len(mappings)}</b>\n"
         f"🔍 Filters: <b>{len(fil_list)}</b> {('— ' + ', '.join(fil_list)) if fil_list else ''}\n"
-        f"✍️ Footer: <code>{endtext[:50] if endtext != 'Not set' else 'Not set'}</code>"
+        f"✍️ Footer: <code>{endtext[:50] if endtext != 'Not set' else 'Not set'}</code>\n"
+        f"📝 Caption Template: {'✅ Set' if cap_tpl else '❌ Not set'}\n"
+        f"🔁 Replace Rules: <b>{repl_cnt}</b>\n"
+        f"🧹 Remove Words: <b>{rmw_cnt}</b>"
     )
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
@@ -392,6 +407,180 @@ async def cmd_listendtext(client, message: Message):
                                         parse_mode=enums.ParseMode.HTML)
     await message.reply_text(f"✍️ <b>Current Footer:</b>\n\n<code>{endtext}</code>",
                              parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== CUSTOM CAPTION (variables) ====================
+
+CAPTION_VARS_TEXT = (
+    "<b>📝 Caption Settings</b>\n\n"
+    "Set your custom caption using variables below.\n\n"
+    "<b>📚 Variables:</b>\n"
+    "<code>{file_name}</code> - Original filename\n"
+    "<code>{default_caption}</code> - Original caption\n"
+    "<code>{title}</code> - Title (before Year/Season/Quality)\n"
+    "<code>{file_size}</code> - File size\n"
+    "<code>{duration}</code> - Video duration\n"
+    "<code>{language}</code> - Language from caption\n"
+    "<code>{audio}</code> - Audio type (DDP5.1, AAC2.0)\n"
+    "<code>{quality}</code> - Quality (HdRip, BluRay)\n"
+    "<code>{resolution}</code> - Res (480p, 1080p)\n"
+    "<code>{year}</code> - Year from caption\n"
+    "<code>{season}</code> - Season (S01, S02)\n"
+    "<code>{episode}</code> - Episode (E01, E02)\n"
+    "<code>{ott}</code> - OTT (NF, AMZN)\n"
+    "<code>{lib}</code> - Codec (x264, x265)\n"
+    "<code>{extension}</code> - File ext\n"
+    "<code>{fps}</code> - FPS (30FPS, 60FPS)\n"
+    "<code>{bitrate}</code> - Audio bitrate\n"
+    "<code>{shortsub}</code> - Sub (Msub/Esub)\n"
+    "<code>{height}</code> - Video height\n"
+    "<code>{width}</code> - Video width\n\n"
+    "<b>Usage:</b> <code>/setcaption &lt;b&gt;{title}&lt;/b&gt; [{year}] {resolution}</code>"
+)
+
+@Client.on_message(filters.command("setcaption") & filters.private)
+async def cmd_setcaption(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(CAPTION_VARS_TEXT, parse_mode=enums.ParseMode.HTML)
+    template = message.text.split(None, 1)[1]
+    await database.set_caption_template(message.from_user.id, template)
+    await message.reply_text(
+        f"✅ <b>Caption template set!</b>\n\n<code>{template}</code>\n\n"
+        f"Ab is caption ke saath forwarding hogi.",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+@Client.on_message(filters.command("showcaption") & filters.private)
+async def cmd_showcaption(client, message: Message):
+    template = await database.get_caption_template(message.from_user.id)
+    if not template:
+        return await message.reply_text(
+            "📝 <b>No caption template set.</b>\n\nUse /setcaption to add one.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    await message.reply_text(f"📝 <b>Current Caption Template:</b>\n\n<code>{template}</code>",
+                             parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("delcaption") & filters.private)
+async def cmd_delcaption(client, message: Message):
+    await database.remove_caption_template(message.from_user.id)
+    await message.reply_text("🗑️ <b>Caption template removed!</b>\n\nDefault caption use hogi ab.",
+                             parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== WORD REPLACE ====================
+
+@Client.on_message(filters.command("addreplace") & filters.private)
+async def cmd_addreplace(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>🔁 Send Replacements</b>\n\n"
+            "<b>Format:</b> <code>Old:New | Old2:New2</code>\n"
+            "<b>Example:</b> <code>Day:Night | You:Me</code>\n\n"
+            "Use | to add multiple rules.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    raw = message.text.split(None, 1)[1]
+    rules = []
+    bad = []
+    for part in raw.split("|"):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            bad.append(part)
+            continue
+        old, new = part.split(":", 1)
+        rules.append((old.strip(), new.strip()))
+    if not rules:
+        return await message.reply_text(
+            "<b>❌ Valid format do:</b> <code>Old:New | Old2:New2</code>", parse_mode=enums.ParseMode.HTML
+        )
+    added = await database.add_replacements(message.from_user.id, rules)
+    text = f"✅ <b>{len(rules)} replacement rule(s) saved!</b> (<b>{added}</b> naye)"
+    if bad:
+        text += f"\n\n⚠️ Skipped (no ':'): <code>{' | '.join(bad)}</code>"
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remreplace") & filters.private)
+async def cmd_remreplace(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remreplace Old | Old2</code>", parse_mode=enums.ParseMode.HTML
+        )
+    raw = message.text.split(None, 1)[1]
+    olds = [w.strip() for w in raw.split("|") if w.strip()]
+    removed = await database.remove_replacements(message.from_user.id, olds)
+    if removed:
+        await message.reply_text(f"🗑️ <b>{removed} rule(s) removed!</b>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text("⚠️ <b>Koi matching rule nahi mila.</b>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("listreplace") & filters.private)
+async def cmd_listreplace(client, message: Message):
+    rules = await database.get_replacements(message.from_user.id)
+    if not rules:
+        return await message.reply_text("🔁 <b>No replacement rules set.</b>\n\nUse /addreplace to add one.",
+                                        parse_mode=enums.ParseMode.HTML)
+    text = "<b>🔁 Active Replacement Rules:</b>\n\n"
+    for i, (old, new) in enumerate(rules, 1):
+        text += f"{i}. <code>{old}</code> → <code>{new}</code>\n"
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("clearreplace") & filters.private)
+async def cmd_clearreplace(client, message: Message):
+    await database.clear_replacements(message.from_user.id)
+    await message.reply_text("🗑️ <b>All replacement rules cleared!</b>", parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== WORD REMOVE ====================
+
+@Client.on_message(filters.command("addremoveword") & filters.private)
+async def cmd_addremoveword(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Send Words To Remove</b>\n\n"
+            "<b>Format:</b> <code>Word1 | Word2 | Word3</code>\n"
+            "<b>Example:</b> <code>Hdts | Hdcam | 4k uhd</code>\n\n"
+            "Use | to add multiple words.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    raw = message.text.split(None, 1)[1]
+    words = [w.strip() for w in raw.split("|") if w.strip()]
+    if not words:
+        return await message.reply_text("<b>❌ Valid word(s) do.</b>", parse_mode=enums.ParseMode.HTML)
+    added = await database.add_remove_words(message.from_user.id, words)
+    await message.reply_text(f"✅ <b>{added} word(s) added to remove-list!</b>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remremoveword") & filters.private)
+async def cmd_remremoveword(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remremoveword Word1 | Word2</code>", parse_mode=enums.ParseMode.HTML
+        )
+    raw = message.text.split(None, 1)[1]
+    words = [w.strip() for w in raw.split("|") if w.strip()]
+    removed = await database.remove_remove_words(message.from_user.id, words)
+    if removed:
+        await message.reply_text(f"🗑️ <b>{removed} word(s) removed from list!</b>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text("⚠️ <b>Koi matching word nahi mila.</b>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("listremovewords") & filters.private)
+async def cmd_listremovewords(client, message: Message):
+    words = await database.get_remove_words(message.from_user.id)
+    if not words:
+        return await message.reply_text("🧹 <b>No remove-words set.</b>\n\nUse /addremoveword to add one.",
+                                        parse_mode=enums.ParseMode.HTML)
+    text = "<b>🧹 Active Remove-Words:</b>\n\n"
+    for i, w in enumerate(words, 1):
+        text += f"{i}. <code>{w}</code>\n"
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("clearremovewords") & filters.private)
+async def cmd_clearremovewords(client, message: Message):
+    await database.clear_remove_words(message.from_user.id)
+    await message.reply_text("🗑️ <b>All remove-words cleared!</b>", parse_mode=enums.ParseMode.HTML)
 
 
 # ==================== STATS ====================
@@ -783,6 +972,9 @@ async def cmd_cancel(client, message: Message):
                       "on","off","resume","status","setdelay","skip",
                       "addfilter","remfilter","listfilters",
                       "endtext","remendtext","listendtext",
+                      "setcaption","showcaption","delcaption",
+                      "addreplace","remreplace","listreplace","clearreplace",
+                      "addremoveword","remremoveword","listremovewords","clearremovewords",
                       "count","resetcount","addadmin","removeuser","ban","unban",
                       "broadcast"])
 )
