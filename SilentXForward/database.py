@@ -10,6 +10,24 @@ user_settings    = db['user_settings']    # delay, on/off, endtext, filters
 admins_col       = db['admins']
 banned_col       = db['banned_users']
 stats_col        = db['forward_stats']
+bot_users_col    = db['bot_users']        # ✅ tracks EVERY user who has started the bot (for broadcast)
+
+
+# ==================== BOT USERS (for broadcast) ====================
+
+async def save_user(user_id: int):
+    """Har /start karne wale user ko yahan record karo — broadcast isi list se jaata hai."""
+    from datetime import datetime
+    await bot_users_col.update_one(
+        {"user_id": user_id},
+        {"$set": {"user_id": user_id, "last_seen": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}},
+        upsert=True
+    )
+
+async def get_all_user_ids() -> list:
+    cursor = bot_users_col.find({}, {"user_id": 1})
+    docs = await cursor.to_list(length=None)
+    return [d["user_id"] for d in docs if d.get("user_id")]
 
 
 # ==================== CHANNEL MAPPINGS ====================
