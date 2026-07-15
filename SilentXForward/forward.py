@@ -4,6 +4,7 @@ from collections import defaultdict
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, RPCError, ChannelInvalid, ChannelPrivate, ChatAdminRequired
 from SilentXForward import database
+from SilentXForward import caption as caption_engine
 import config as cfg
 
 # ================= CONFIG =================
@@ -136,22 +137,36 @@ async def handle_flood(func, **kwargs):
 
 
 # ================= SINGLE FORWARD =================
-async def forward_single_message(client, message, chat_id, sender_client=None, caption_extra: str = ""):
+async def forward_single_message(client, message, chat_id, sender_client=None, caption_settings: dict = None):
     try:
         writer = sender_client if sender_client else client
+        cs = caption_settings or {}
+        has_customization = bool(
+            cs.get("caption_template") or cs.get("endtext") or
+            cs.get("replace_rules") or cs.get("remove_words")
+        )
 
-        extra_caption = None
-        if caption_extra:
-            existing = message.caption or message.text or ""
-            extra_caption = f"{existing}\n\n{caption_extra}".strip() if existing else caption_extra
+        final_caption = None
+        if has_customization:
+            try:
+                final_caption = caption_engine.build_final_caption(
+                    message,
+                    caption_template=cs.get("caption_template", ""),
+                    endtext=cs.get("endtext", ""),
+                    replace_rules=cs.get("replace_rules"),
+                    remove_words=cs.get("remove_words"),
+                )
+            except Exception:
+                logger.exception("Caption engine failed, falling back to original caption")
+                final_caption = None
 
-        if extra_caption:
+        if final_caption:
             await handle_flood(
                 writer.copy_message,
                 chat_id=chat_id,
                 from_chat_id=message.chat.id,
                 message_id=message.id,
-                caption=extra_caption,
+                caption=final_caption,
             )
         else:
             await handle_flood(
@@ -194,13 +209,13 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
 
 # ================= BUFFER FORWARD =================
 async def forward_buffered_messages(client, messages, chat_id, sender_client=None,
-                                     msg_delay: float = MSG_DELAY, caption_extra: str = ""):
+                                     msg_delay: float = MSG_DELAY, caption_settings: dict = None):
     success = 0
     for msg in sorted(messages, key=lambda m: m.id):
         try:
             ok = await forward_single_message(client, msg, chat_id,
                                               sender_client=sender_client,
-                                              caption_extra=caption_extra)
+                                              caption_settings=caption_settings)
             if ok:
                 success += 1
         except Exception:
@@ -215,33 +230,38 @@ async def process_queue(client):
 
     sem = asyncio.Semaphore(TARGET_CONCURRENCY)
 
-    async def forward_target(chat_id, payload, ftype, sender_client, msg_delay, caption_extra):
+    async def forward_target(chat_id, payload, ftype, sender_client, msg_delay, caption_settings):
         async with sem:
             if ftype == "buffered":
                 return await forward_buffered_messages(
                     client, payload, chat_id,
                     sender_client=sender_client,
                     msg_delay=msg_delay,
-                    caption_extra=caption_extra
+                    caption_settings=caption_settings
                 )
             return await forward_single_message(
                 client, payload, chat_id,
                 sender_client=sender_client,
-                caption_extra=caption_extra
+                caption_settings=caption_settings
             )
 
     while True:
         try:
             payload, targets, ftype, retry_count, sender_client, source_info = await message_queue.get()
 
-            user_id       = source_info.get("user_id")
-            msg_delay     = source_info.get("delay", MSG_DELAY)
-            caption_extra = source_info.get("endtext", "") or ""
+            user_id          = source_info.get("user_id")
+            msg_delay        = source_info.get("delay", MSG_DELAY)
+            caption_settings = {
+                "endtext": source_info.get("endtext", "") or "",
+                "caption_template": source_info.get("caption_template", "") or "",
+                "replace_rules": source_info.get("replace_rules") or [],
+                "remove_words": source_info.get("remove_words") or [],
+            }
             failed        = []
             succeeded     = []
 
             tasks = [
-                forward_target(tid, payload, ftype, sender_client, msg_delay, caption_extra)
+                forward_target(tid, payload, ftype, sender_client, msg_delay, caption_settings)
                 for tid in targets
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -411,8 +431,11 @@ async def process_buffered_messages(source_chat_id, source_client=None):
             else:
                 messages_to_send = messages
 
-            msg_delay = await database.get_delay(user_id) if user_id else MSG_DELAY
-            endtext   = await database.get_endtext(user_id) if user_id else None
+            msg_delay        = await database.get_delay(user_id) if user_id else MSG_DELAY
+            endtext          = await database.get_endtext(user_id) if user_id else None
+            caption_template = await database.get_caption_template(user_id) if user_id else None
+            replace_rules    = await database.get_replacements(user_id) if user_id else []
+            remove_words     = await database.get_remove_words(user_id) if user_id else []
 
             sender = source_client
             if user_id and user_id in active_userbots:
@@ -426,6 +449,9 @@ async def process_buffered_messages(source_chat_id, source_client=None):
                 "user_id": user_id,
                 "delay": msg_delay,
                 "endtext": endtext or "",
+                "caption_template": caption_template or "",
+                "replace_rules": replace_rules,
+                "remove_words": remove_words,
             }
 
             await message_queue.put((messages_to_send.copy(), targets, "buffered", 0, sender, source_info))
