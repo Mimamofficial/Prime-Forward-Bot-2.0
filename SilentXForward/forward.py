@@ -80,18 +80,11 @@ def _register_userbot_handler(ub: Client, user_id: int):
             if _is_duplicate(cid, message.id):
                 return
 
-            # ✅ FIX: Sirf message add karo — task cancel mat karo
-            message_buffer[cid].append(message)
-
-            # Agar task already chal raha hai toh naya mat banao
-            old = buffer_tasks.get(cid)
-            if old and not old.done():
-                return  # existing task hi process karega
-
-            # Naya task sirf tab banao jab koi task nahi hai
-            buffer_tasks[cid] = asyncio.create_task(
-                process_buffered_messages(cid, source_client=client)
-            )
+            # ✅ FIX: bot-side handler jaisa hi _handle_incoming_message use karo,
+            # taaki buffer_timers bhi update ho (pehle yeh missing tha — isliye
+            # userbot se aane wale bulk/album forwards debounce wait ke bina
+            # jaldi cut ho jaate the aur messages skip ho sakte the).
+            _handle_incoming_message(cid, message, source_client=client)
         except Exception:
             logger.exception(f"Userbot handler error for user {user_id}")
 
