@@ -199,6 +199,92 @@ async def get_caption_style(user_id: int) -> str:
     return doc.get("caption_style", "normal")  # default = normal
 
 
+# ==================== CUSTOM CAPTION TEMPLATE ====================
+
+async def set_caption_template(user_id: int, template: str):
+    await _update_settings(user_id, {"caption_template": template})
+
+async def get_caption_template(user_id: int) -> str | None:
+    doc = await _get_settings(user_id)
+    return doc.get("caption_template", None)
+
+async def remove_caption_template(user_id: int):
+    await user_settings.update_one({"user_id": user_id}, {"$unset": {"caption_template": ""}}, upsert=True)
+
+
+# ==================== WORD REPLACE (Old:New rules) ====================
+
+async def add_replacements(user_id: int, rules: list) -> int:
+    """rules = list of (old, new) tuples. Same 'old' (case-insensitive) gets updated."""
+    doc = await _get_settings(user_id)
+    existing = doc.get("replacements", [])  # list of [old, new]
+    lower_keys = {r[0].lower(): i for i, r in enumerate(existing)}
+    added = 0
+    for old, new in rules:
+        old = old.strip()
+        new = new.strip()
+        if not old:
+            continue
+        key = old.lower()
+        if key in lower_keys:
+            existing[lower_keys[key]] = [old, new]
+        else:
+            existing.append([old, new])
+            lower_keys[key] = len(existing) - 1
+            added += 1
+    await _update_settings(user_id, {"replacements": existing})
+    return added
+
+async def remove_replacements(user_id: int, olds: list) -> int:
+    doc = await _get_settings(user_id)
+    existing = doc.get("replacements", [])
+    lower_targets = {o.strip().lower() for o in olds if o.strip()}
+    new_list = [r for r in existing if r[0].lower() not in lower_targets]
+    removed = len(existing) - len(new_list)
+    await _update_settings(user_id, {"replacements": new_list})
+    return removed
+
+async def get_replacements(user_id: int) -> list:
+    doc = await _get_settings(user_id)
+    return [tuple(r) for r in doc.get("replacements", [])]
+
+async def clear_replacements(user_id: int):
+    await _update_settings(user_id, {"replacements": []})
+
+
+# ==================== WORD REMOVE (caption cleanup) ====================
+
+async def add_remove_words(user_id: int, words: list) -> int:
+    doc = await _get_settings(user_id)
+    existing = doc.get("remove_words", [])
+    lower_existing = {w.lower() for w in existing}
+    added = 0
+    for w in words:
+        w = w.strip()
+        if w and w.lower() not in lower_existing:
+            existing.append(w)
+            lower_existing.add(w.lower())
+            added += 1
+    await _update_settings(user_id, {"remove_words": existing})
+    return added
+
+async def remove_remove_words(user_id: int, words: list) -> int:
+    doc = await _get_settings(user_id)
+    existing = doc.get("remove_words", [])
+    lower_targets = {w.strip().lower() for w in words if w.strip()}
+    new_list = [w for w in existing if w.lower() not in lower_targets]
+    removed = len(existing) - len(new_list)
+    await _update_settings(user_id, {"remove_words": new_list})
+    return removed
+
+async def get_remove_words(user_id: int) -> list:
+    doc = await _get_settings(user_id)
+    return doc.get("remove_words", [])
+
+async def clear_remove_words(user_id: int):
+    await _update_settings(user_id, {"remove_words": []})
+
+
 # ==================== ADMIN SYSTEM ====================
 
 async def add_admin(owner_id: int, target_user_id: int):
