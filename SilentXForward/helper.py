@@ -117,6 +117,62 @@ def owner_only(func):
     return wrapper
 
 
+def admin_only(func):
+    """Decorator — OWNER_ID ya /addadmin se add kiya gaya admin, dono use kar sakte hain."""
+    async def wrapper(client, message: Message):
+        user_id  = message.from_user.id
+        is_owner = bool(cfg.OWNER_ID) and user_id == cfg.OWNER_ID
+        allowed  = is_owner
+        if not allowed and cfg.OWNER_ID:
+            try:
+                allowed = await database.is_admin(cfg.OWNER_ID, user_id)
+            except Exception:
+                logger.exception("admin_only: is_admin check failed")
+                allowed = False
+        if not allowed:
+            return await message.reply_text(
+                "🚫 <b>Access Denied!</b>\n\nYeh command sirf bot owner ya admin use kar sakta hai.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        return await func(client, message)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+# ==================== GLOBAL BAN CHECK ====================
+# Banned user ka koi bhi private message/command yahin rok diya jaata hai,
+# taaki /ban se banaya gaya ban actually kaam kare.
+
+@Client.on_message(filters.private, group=-1)
+async def global_ban_check(client, message: Message):
+    if not message.from_user:
+        return
+    user_id = message.from_user.id
+    if cfg.OWNER_ID and user_id == cfg.OWNER_ID:
+        return
+    try:
+        # ✅ Opportunistically record every interacting user — covers users who
+        # started the bot before this fix and never sent /start again.
+        await database.save_user(user_id)
+    except Exception:
+        pass
+    try:
+        banned = await database.is_banned(cfg.OWNER_ID, user_id)
+    except Exception:
+        logger.exception("global_ban_check: is_banned lookup failed")
+        banned = False
+    if banned:
+        try:
+            await message.reply_text(
+                "🚫 <b>You are banned from using this bot.</b>\n\n"
+                "Agar lagta hai yeh galti hai to bot owner se contact karo.",
+                parse_mode=enums.ParseMode.HTML
+            )
+        except Exception:
+            pass
+        message.stop_propagation()
+
+
 # ==================== HELPERS ====================
 
 async def smart_get_chat(client, chat_id, user_id):
@@ -152,6 +208,7 @@ async def start_command(client, message):
         if not_joined:
             return await send_fsub_message(client, message, not_joined)
 
+        await database.save_user(message.from_user.id)  # ✅ FIX: broadcast list ke liye har user record karo
         await log_new_user(client, message.from_user)
         await message.reply_photo(photo=START_IMAGE, caption=START_TEXT,
                                   parse_mode=enums.ParseMode.HTML, reply_markup=BUTTONS)
@@ -393,7 +450,7 @@ async def cmd_removeuser(client, message: Message):
         await message.reply_text("<b>❌ Valid user_id do.</b>", parse_mode=enums.ParseMode.HTML)
 
 @Client.on_message(filters.command("ban") & filters.private)
-@owner_only
+@admin_only
 async def cmd_ban(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -401,7 +458,18 @@ async def cmd_ban(client, message: Message):
         )
     try:
         target_id = int(message.command[1])
-        await database.ban_user(message.from_user.id, target_id)
+        if cfg.OWNER_ID and target_id == cfg.OWNER_ID:
+            return await message.reply_text("<b>❌ Owner ko ban nahi kar sakte.</b>", parse_mode=enums.ParseMode.HTML)
+        # ✅ FIX: hamesha cfg.OWNER_ID ke under scope karo (admin ke apne id ke under nahi),
+        # warna admin ka ban owner/dusre admins ko dikhega hi nahi.
+        await database.ban_user(cfg.OWNER_ID, target_id)
+        from SilentXForward.forward import active_userbots
+        ub = active_userbots.pop(target_id, None)
+        if ub:
+            try:
+                await ub.stop()
+            except Exception:
+                pass
         await message.reply_text(
             f"🚫 <b>User banned:</b> <code>{target_id}</code>", parse_mode=enums.ParseMode.HTML
         )
@@ -409,7 +477,7 @@ async def cmd_ban(client, message: Message):
         await message.reply_text("<b>❌ Valid user_id do.</b>", parse_mode=enums.ParseMode.HTML)
 
 @Client.on_message(filters.command("unban") & filters.private)
-@owner_only
+@admin_only
 async def cmd_unban(client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
@@ -417,7 +485,7 @@ async def cmd_unban(client, message: Message):
         )
     try:
         target_id = int(message.command[1])
-        unbanned = await database.unban_user(message.from_user.id, target_id)
+        unbanned = await database.unban_user(cfg.OWNER_ID, target_id)
         if unbanned:
             await message.reply_text(
                 f"✅ <b>User unbanned:</b> <code>{target_id}</code>", parse_mode=enums.ParseMode.HTML
@@ -563,7 +631,7 @@ async def clear_all(client, message: Message):
 # ==================== BROADCAST ====================
 
 @Client.on_message(filters.command("broadcast") & filters.private)
-@owner_only
+@admin_only
 async def cmd_broadcast(client, message: Message):
     # Message must be a reply OR have text after command
     if not message.reply_to_message and len(message.command) < 2:
@@ -577,9 +645,12 @@ async def cmd_broadcast(client, message: Message):
 
     status_msg = await message.reply_text("📢 <b>Broadcasting...</b>", parse_mode=enums.ParseMode.HTML)
 
-    # Get all unique user IDs from database
-    all_sessions = await database.get_all_userbot_sessions()
-    user_ids = list({doc["user_id"] for doc in all_sessions if doc.get("user_id")})
+    # ✅ FIX: pehle sirf userbot-login wale users ko milta tha, ab SABHI bot users ko jaata hai
+    # (jinhone kabhi bhi /start kiya ho), userbot-session users ke saath union karke.
+    broadcast_users = set(await database.get_all_user_ids())
+    all_sessions     = await database.get_all_userbot_sessions()
+    broadcast_users.update(doc["user_id"] for doc in all_sessions if doc.get("user_id"))
+    user_ids = list(broadcast_users)
 
     if not user_ids:
         return await status_msg.edit("<b>⚠️ Koi user nahi mila.</b>", parse_mode=enums.ParseMode.HTML)
