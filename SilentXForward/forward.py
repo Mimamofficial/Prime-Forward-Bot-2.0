@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait, RPCError, ChannelInvalid, ChannelPrivate, ChatAdminRequired
+from pyrogram.errors import FloodWait, RPCError, ChannelInvalid, ChannelPrivate, ChatAdminRequired, PeerIdInvalid
 from SilentXForward import database
 from SilentXForward import caption as caption_engine
 import config as cfg
@@ -26,6 +26,15 @@ buffer_timers  = {}   # ✅ NEW: tracks last message time per chat
 
 # Dedup tracker
 seen_message_ids: dict[int, set] = defaultdict(set)
+
+# ✅ FIX: ek hi glitch pe mapping delete nahi hogi ab — sirf itni baar
+# LAGATAAR real failure hone ke baad hi target DB se remove hoga.
+_invalid_target_strikes: dict[int, int] = defaultdict(int)
+STRIKE_LIMIT = 5
+
+# ✅ FIX: (writer_id, chat_id) pairs jinka peer already resolve ho chuka hai —
+# taaki har message pe dobara resolve na karna pade.
+_resolved_peers: set[tuple[int, int]] = set()
 
 _bot_client = None
 
@@ -64,6 +73,19 @@ async def start_single_userbot(user_id: int, session_string: str) -> Client:
 
     me = await ub.get_me()
     logger.info(f"✅ Userbot started: user_id={user_id} → @{me.username} ({me.first_name})")
+
+    # ✅ FIX: session in_memory=True hai, isliye restart/redeploy pe Pyrogram ka
+    # peer cache (access_hash waghera) khaali ho jaata hai. Agar forwarding
+    # turant shuru ho gayi (target ka peer resolve hone se pehle), Pyrogram
+    # false ChannelInvalid/PeerIdInvalid de deta tha aur mapping galti se DB
+    # se delete ho jaati thi. Start hote hi dialogs load karke cache warm karo.
+    try:
+        async for _ in ub.get_dialogs():
+            pass
+        logger.info(f"✅ Peer cache warmed for user_id={user_id}")
+    except Exception as e:
+        logger.warning(f"Dialog warm-up failed for user_id={user_id}: {e}")
+
     return ub
 
 
@@ -136,10 +158,41 @@ async def handle_flood(func, **kwargs):
     raise Exception("Max retries exceeded in handle_flood")
 
 
+async def _ensure_peer_resolved(writer, chat_id: int) -> bool:
+    """
+    ✅ FIX: copy_message se pehle target ka peer resolve/cache karo. Isse
+    false ChannelInvalid/PeerIdInvalid errors rukte hain jo sirf isliye aate
+    hain kyunki userbot ne abhi tak us chat ko "dekha" nahi (khaaskar
+    restart ke turant baad, kyunki session in_memory hai).
+    """
+    key = (id(writer), chat_id)
+    if key in _resolved_peers:
+        return True
+    try:
+        await writer.get_chat(chat_id)
+        _resolved_peers.add(key)
+        return True
+    except PeerIdInvalid:
+        try:
+            async for dialog in writer.get_dialogs():
+                if dialog.chat.id == chat_id:
+                    _resolved_peers.add(key)
+                    return True
+        except Exception as e:
+            logger.warning(f"Dialog scan failed while resolving {chat_id}: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"get_chat failed while resolving {chat_id}: {e}")
+        return False
+
+
 # ================= SINGLE FORWARD =================
 async def forward_single_message(client, message, chat_id, sender_client=None, caption_settings: dict = None):
+    writer = sender_client if sender_client else client
     try:
-        writer = sender_client if sender_client else client
+        # ✅ FIX: forward karne se pehle peer resolve karo
+        await _ensure_peer_resolved(writer, chat_id)
+
         cs = caption_settings or {}
         has_customization = bool(
             cs.get("caption_template") or cs.get("endtext") or
@@ -175,15 +228,43 @@ async def forward_single_message(client, message, chat_id, sender_client=None, c
                 from_chat_id=message.chat.id,
                 message_id=message.id,
             )
+        _invalid_target_strikes.pop(chat_id, None)
         return True
 
+    except PeerIdInvalid as e:
+        # ✅ FIX: yeh zyadatar TRANSIENT hota hai (peer cache miss, khaaskar
+        # restart ke baad) — mapping delete NAHI karna, bas is baar skip karo,
+        # agli baar peer resolve ho jaayega aur forward chalne lagega.
+        logger.warning(f"PeerIdInvalid for {chat_id} (transient, mapping safe): {e}")
+        return False
+
     except (ChannelInvalid, ChannelPrivate) as e:
-        # ✅ FIX: Channel invalid/private — auto remove from ALL users' mappings
-        logger.warning(f"Channel invalid/private: {chat_id} — auto removing from DB. Error: {e}")
-        try:
-            await database.remove_invalid_target(chat_id)
-        except Exception as db_err:
-            logger.error(f"DB cleanup failed for {chat_id}: {db_err}")
+        # ✅ FIX: ek hi baar fail hone pe turant delete nahi karte — pehle bot
+        # client se fallback try karo, phir strike count badhao. Sirf
+        # STRIKE_LIMIT baar LAGATAAR real failure hone ke baad hi target DB
+        # se remove hoga — isse ek transient glitch pe mapping gayab nahi hogi.
+        logger.warning(f"Channel invalid/private for {chat_id}: {e}")
+        if sender_client and sender_client != client:
+            try:
+                await handle_flood(
+                    client.copy_message,
+                    chat_id=chat_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                )
+                _invalid_target_strikes.pop(chat_id, None)
+                return True
+            except Exception:
+                pass
+
+        _invalid_target_strikes[chat_id] += 1
+        if _invalid_target_strikes[chat_id] >= STRIKE_LIMIT:
+            logger.warning(f"{chat_id} failed {STRIKE_LIMIT}x lagataar — ab DB se remove kar rahe hain.")
+            try:
+                await database.remove_invalid_target(chat_id)
+            except Exception as db_err:
+                logger.error(f"DB cleanup failed for {chat_id}: {db_err}")
+            _invalid_target_strikes.pop(chat_id, None)
         return False
 
     except ChatAdminRequired as e:
