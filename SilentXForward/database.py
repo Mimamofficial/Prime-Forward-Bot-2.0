@@ -174,6 +174,10 @@ async def get_filters(user_id: int) -> list:
     doc = await _get_settings(user_id)
     return doc.get("filters", [])
 
+async def clear_filters(user_id: int):
+    """✅ NEW: interactive settings menu ke 'Clear All' button ke liye."""
+    await _update_settings(user_id, {"filters": []})
+
 # ── End Text (Footer) ──
 async def set_endtext(user_id: int, text: str):
     await _update_settings(user_id, {"endtext": text})
@@ -283,6 +287,25 @@ async def get_remove_words(user_id: int) -> list:
 
 async def clear_remove_words(user_id: int):
     await _update_settings(user_id, {"remove_words": []})
+
+
+# ==================== RESET ALL SETTINGS ====================
+
+async def reset_all_settings(user_id: int):
+    """
+    ✅ NEW: /reset command ke liye — SAB KUCH default pe wapas: caption
+    template, footer/prefix (endtext), filters, replace-rules, remove-words
+    AUR source/target channel mappings — sab delete ho jaayenge.
+    """
+    await user_settings.update_one(
+        {"user_id": user_id},
+        {
+            "$unset": {"caption_template": "", "endtext": ""},
+            "$set": {"filters": [], "replacements": [], "remove_words": []},
+        },
+        upsert=True,
+    )
+    await clear_all_mappings(user_id)
 
 
 # ==================== ADMIN SYSTEM ====================
