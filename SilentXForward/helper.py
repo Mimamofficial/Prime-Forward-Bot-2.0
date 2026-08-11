@@ -17,9 +17,9 @@ import config as cfg
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-START_IMAGE = "https://files.catbox.moe/oht30s.jpg"
+START_IMAGE = "https://files.catbox.moe/ukxof7.jpg"
 
-START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
+START_TEXT = """<b>🎬 𝗔𝘂𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲 𝗙𝗼𝗿𝘄𝗮𝗿𝗱𝗲𝗿 𝗕𝗼𝘁 — Now Live!
 
 Auto forward videos & files from any private channel to your channel — without "Forwarded From" tag!
 
@@ -84,7 +84,7 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 """
 
 ABOUT_TEXT = """<b><blockquote>╭────[ ᴍʏ ᴅᴇᴛᴀɪʟs ]────⍟</blockquote>
-<blockquote>├⍟ 🎭 Mʏ Nᴀᴍᴇ : <a href='https://t.me/Prime_Forwards_Bot'>𝗣𝗿𝗶𝗺𝗲 𝗙𝗼𝗿𝘄𝗮𝗿𝗱 𝗕𝗼𝘁</a></blockquote>
+<blockquote>├⍟ 🎭 Mʏ Nᴀᴍᴇ : <a href='https://t.me/FWBSEBOT'>𝗔𝘂𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲 𝗙𝗼𝗿𝘄𝗮𝗿𝗱𝗲𝗿 𝗕𝗼𝘁</a></blockquote>
 <blockquote>├⍟ 🇮🇳 Cʀᴇᴀᴛᴏʀ : <a href='https://t.me/mimam_officialx/'>𝄟͢🦋⃟≛⃝ 𝐌𝐮𝐳𝐚𝐟𝐟𝐚𝐫 𝄟⃝❤</a></blockquote>
 <blockquote>├⍟ 📚 Lɪʙʀᴀʀʏ : <a href='https://docs.pyrogram.org/'>ᴘʏʀᴏɢʀᴀᴍ</a></blockquote>
 <blockquote>├⍟ 🍿 Lᴀɴɢᴜᴀɢᴇ : <a href='https://www.python.org/download/releases/3.0/'>ᴘʏᴛʜᴏɴ 𝟹</a></blockquote>
