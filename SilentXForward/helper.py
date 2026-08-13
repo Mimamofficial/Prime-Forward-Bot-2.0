@@ -607,8 +607,8 @@ RESET_WARN_TEXT = (
 
 def _reset_confirm_markup(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ YES, RESET EVERYTHING", callback_data=f"confirm_reset:{user_id}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_reset:{user_id}")],
+        [InlineKeyboardButton(_sc("✅ YES, RESET EVERYTHING"), callback_data=f"confirm_reset:{user_id}")],
+        [InlineKeyboardButton(_sc("❌ Cancel"), callback_data=f"cancel_reset:{user_id}")],
     ])
 
 @Client.on_message(filters.command("reset") & filters.private)
@@ -1211,6 +1211,17 @@ settings_states: dict[int, dict] = {}   # user_id -> {"action": ..., "back": ...
 
 MENU_HEADER = "🖐 <b>Select an option below to manage:</b>"
 
+# ✅ NEW: button labels ko sᴍᴀʟʟ ᴄᴀᴘꜱ unicode style mein dikhane ke liye —
+# sirf English letters convert hote hain, emoji/space/symbols waise hi rehte hain.
+_SMALLCAPS_MAP = str.maketrans(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ"
+)
+
+def _sc(text: str) -> str:
+    """Button label ko small-caps style mein convert karo."""
+    return text.translate(_SMALLCAPS_MAP)
+
 # action-key -> submenu jahan wapas jaana hai jab input mil jaaye ya cancel ho
 _INPUT_BACK_MENU = {
     "delay": "delay",
@@ -1244,25 +1255,25 @@ INPUT_PROMPTS = {
 
 def _menu_main_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏱️ Delay", callback_data="menu:delay"),
-         InlineKeyboardButton("🔍 Filters", callback_data="menu:filters")],
-        [InlineKeyboardButton("✍️ Footer", callback_data="menu:footer"),
-         InlineKeyboardButton("📝 Caption", callback_data="menu:caption")],
-        [InlineKeyboardButton("🔁 Replace Words", callback_data="menu:replace"),
-         InlineKeyboardButton("🧹 Remove Words", callback_data="menu:removewords")],
-        [InlineKeyboardButton("📊 Manage Channels", callback_data="menu:manage"),
-         InlineKeyboardButton("📈 Stats", callback_data="menu:stats")],
-        [InlineKeyboardButton("🔑 Login / Session", callback_data="menu:login"),
-         InlineKeyboardButton("👑 Admin", callback_data="menu:admin")],
-        [InlineKeyboardButton("ℹ️ Status", callback_data="menu:status"),
-         InlineKeyboardButton("⏯️ Toggle Forward", callback_data="menu:toggle")],
-        [InlineKeyboardButton("🧨 RESET ALL SETTINGS", callback_data="menu:reset")],
-        [InlineKeyboardButton("🔙 Back", callback_data="menu:back"),
-         InlineKeyboardButton("❌ Close", callback_data="menu:close")],
+        [InlineKeyboardButton(_sc("⏱️ Delay"), callback_data="menu:delay"),
+         InlineKeyboardButton(_sc("🔍 Filters"), callback_data="menu:filters")],
+        [InlineKeyboardButton(_sc("✍️ Footer"), callback_data="menu:footer"),
+         InlineKeyboardButton(_sc("📝 Caption"), callback_data="menu:caption")],
+        [InlineKeyboardButton(_sc("🔁 Replace Words"), callback_data="menu:replace"),
+         InlineKeyboardButton(_sc("🧹 Remove Words"), callback_data="menu:removewords")],
+        [InlineKeyboardButton(_sc("📊 Manage Channels"), callback_data="menu:manage"),
+         InlineKeyboardButton(_sc("📈 Stats"), callback_data="menu:stats")],
+        [InlineKeyboardButton(_sc("🔑 Login / Session"), callback_data="menu:login"),
+         InlineKeyboardButton(_sc("👑 Admin"), callback_data="menu:admin")],
+        [InlineKeyboardButton(_sc("ℹ️ Status"), callback_data="menu:status"),
+         InlineKeyboardButton(_sc("⏯️ Toggle Forward"), callback_data="menu:toggle")],
+        [InlineKeyboardButton(_sc("🧨 RESET ALL SETTINGS"), callback_data="menu:reset")],
+        [InlineKeyboardButton(_sc("🔙 Back"), callback_data="menu:back"),
+         InlineKeyboardButton(_sc("❌ Close"), callback_data="menu:close")],
     ])
 
 def _back_menu_button(target: str = "main") -> list:
-    return [InlineKeyboardButton("🔙 Back to Menu", callback_data=f"menu:{target}")]
+    return [InlineKeyboardButton(_sc("🔙 Back to Menu"), callback_data=f"menu:{target}")]
 
 
 # ── Submenu renderers: har ek (text, markup) return karta hai ──────────────
@@ -1271,9 +1282,9 @@ async def _render_delay(user_id):
     delay = await database.get_delay(user_id)
     text = f"⏱️ <b>Message Delay</b>\n\nCurrent: <code>{delay}s</code>\n\nPreset choose karo ya custom bhejo:"
     kb = [
-        [InlineKeyboardButton("0.1s", callback_data="delay:0.1"), InlineKeyboardButton("0.5s", callback_data="delay:0.5")],
-        [InlineKeyboardButton("1s", callback_data="delay:1"), InlineKeyboardButton("2s", callback_data="delay:2")],
-        [InlineKeyboardButton("✏️ Custom", callback_data="input:delay")],
+        [InlineKeyboardButton(_sc("0.1s"), callback_data="delay:0.1"), InlineKeyboardButton(_sc("0.5s"), callback_data="delay:0.5")],
+        [InlineKeyboardButton(_sc("1s"), callback_data="delay:1"), InlineKeyboardButton(_sc("2s"), callback_data="delay:2")],
+        [InlineKeyboardButton(_sc("✏️ Custom"), callback_data="input:delay")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1283,9 +1294,9 @@ async def _render_filters(user_id):
     text = "🔍 <b>Keyword Filters</b>\n\n"
     text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>No filters set — sab messages forward honge.</i>"
     kb = [
-        [InlineKeyboardButton("➕ Add", callback_data="input:filter_add"),
-         InlineKeyboardButton("🗑️ Remove", callback_data="input:filter_rem")],
-        [InlineKeyboardButton("🧹 Clear All", callback_data="action:filter_clear")],
+        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:filter_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:filter_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:filter_clear")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1295,8 +1306,8 @@ async def _render_footer(user_id):
     text = "✍️ <b>Footer / Prefix Text</b>\n\n"
     text += f"<code>{footer}</code>" if footer else "<i>No footer set.</i>"
     kb = [
-        [InlineKeyboardButton("✏️ Set", callback_data="input:footer_set"),
-         InlineKeyboardButton("🗑️ Remove", callback_data="action:footer_rem")],
+        [InlineKeyboardButton(_sc("✏️ Set"), callback_data="input:footer_set"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="action:footer_rem")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1306,9 +1317,9 @@ async def _render_caption(user_id):
     text = "📝 <b>Custom Caption Template</b>\n\n"
     text += f"<code>{tmpl}</code>" if tmpl else "<i>No caption template set — default caption use hogi.</i>"
     kb = [
-        [InlineKeyboardButton("✏️ Set", callback_data="input:caption_set"),
-         InlineKeyboardButton("🗑️ Remove", callback_data="action:caption_rem")],
-        [InlineKeyboardButton("📚 Variables List", callback_data="action:caption_vars")],
+        [InlineKeyboardButton(_sc("✏️ Set"), callback_data="input:caption_set"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="action:caption_rem")],
+        [InlineKeyboardButton(_sc("📚 Variables List"), callback_data="action:caption_vars")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1318,9 +1329,9 @@ async def _render_replace(user_id):
     text = "🔁 <b>Replace Words</b>\n\n"
     text += "\n".join(f"{i}. <code>{o}</code> → <code>{n}</code>" for i, (o, n) in enumerate(rules, 1)) if rules else "<i>No rules set.</i>"
     kb = [
-        [InlineKeyboardButton("➕ Add", callback_data="input:replace_add"),
-         InlineKeyboardButton("🗑️ Remove", callback_data="input:replace_rem")],
-        [InlineKeyboardButton("🧹 Clear All", callback_data="action:replace_clear")],
+        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:replace_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:replace_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:replace_clear")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1330,9 +1341,9 @@ async def _render_removewords(user_id):
     text = "🧹 <b>Remove Words</b>\n\n"
     text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>No remove-words set.</i>"
     kb = [
-        [InlineKeyboardButton("➕ Add", callback_data="input:remword_add"),
-         InlineKeyboardButton("🗑️ Remove", callback_data="input:remword_rem")],
-        [InlineKeyboardButton("🧹 Clear All", callback_data="action:remword_clear")],
+        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:remword_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:remword_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:remword_clear")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1346,10 +1357,10 @@ async def _render_manage(user_id):
     else:
         text += "<i>No mappings yet.</i>"
     kb = [
-        [InlineKeyboardButton("➕ Set New", callback_data="input:mapping_set")],
-        [InlineKeyboardButton("🗑️ Remove Target", callback_data="input:mapping_remtarget"),
-         InlineKeyboardButton("🗑️ Remove Source", callback_data="input:mapping_remsource")],
-        [InlineKeyboardButton("🧨 Clear All Channels", callback_data="action:mapping_clear")],
+        [InlineKeyboardButton(_sc("➕ Set New"), callback_data="input:mapping_set")],
+        [InlineKeyboardButton(_sc("🗑️ Remove Target"), callback_data="input:mapping_remtarget"),
+         InlineKeyboardButton(_sc("🗑️ Remove Source"), callback_data="input:mapping_remsource")],
+        [InlineKeyboardButton(_sc("🧨 Clear All Channels"), callback_data="action:mapping_clear")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1358,7 +1369,7 @@ async def _render_stats(user_id):
     count = await database.get_forward_count(user_id)
     text = f"📈 <b>Forward Stats</b>\n\n✅ Total Forwarded: <b>{count}</b> messages"
     kb = [
-        [InlineKeyboardButton("🔄 Reset Count", callback_data="action:count_reset")],
+        [InlineKeyboardButton(_sc("🔄 Reset Count"), callback_data="action:count_reset")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1371,7 +1382,7 @@ async def _render_login(user_id):
         status = "🟢 Active" if (ub and ub.is_connected) else "🔴 Inactive (restart bot)"
         text = (f"🔑 <b>Session Info</b>\n\n👤 Status: {status}\n"
                 f"📱 Phone: {session.get('phone','N/A')}\n🕐 Login: {session.get('created_at','N/A')}")
-        kb = [[InlineKeyboardButton("🚪 Logout", callback_data="action:logout")], _back_menu_button()]
+        kb = [[InlineKeyboardButton(_sc("🚪 Logout"), callback_data="action:logout")], _back_menu_button()]
     else:
         text = "🔑 <b>Userbot Login</b>\n\nAap logged in nahi ho.\n\n<i>Login karne ke liye /login command use karo (security ke liye phone/OTP button se nahi liya jaata).</i>"
         kb = [_back_menu_button()]
@@ -1380,9 +1391,9 @@ async def _render_login(user_id):
 async def _render_admin(user_id):
     text = "👑 <b>Admin Tools</b>\n\nAdmin add/remove aur ban/unban yahan se karo."
     kb = [
-        [InlineKeyboardButton("➕ Add Admin", callback_data="input:admin_add")],
-        [InlineKeyboardButton("🚫 Ban User", callback_data="input:admin_ban"),
-         InlineKeyboardButton("✅ Unban User", callback_data="input:admin_unban")],
+        [InlineKeyboardButton(_sc("➕ Add Admin"), callback_data="input:admin_add")],
+        [InlineKeyboardButton(_sc("🚫 Ban User"), callback_data="input:admin_ban"),
+         InlineKeyboardButton(_sc("✅ Unban User"), callback_data="input:admin_unban")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1524,7 +1535,7 @@ async def cb_menu_input_prompt(client, callback_query):
 
     settings_states[user_id] = {"action": key, "back": _INPUT_BACK_MENU.get(key, "main")}
     await callback_query.answer()
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="input_cancel")]])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(_sc("❌ Cancel"), callback_data="input_cancel")]])
     await callback_query.message.edit_text(
         f"{prompt}\n\n<i>Cancel karne ke liye neeche button dabao.</i>",
         parse_mode=enums.ParseMode.HTML, reply_markup=kb
