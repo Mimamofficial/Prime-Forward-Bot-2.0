@@ -6,7 +6,7 @@ from SilentXForward.logger import (
     log_new_user, log_login, log_logout,
     log_source_added, log_source_removed, log_target_removed
 )
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters, enums, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import (
     PhoneNumberInvalid, PhoneCodeInvalid, PhoneCodeExpired,
@@ -17,9 +17,9 @@ import config as cfg
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-START_IMAGE = "https://files.catbox.moe/ukxof7.jpg"
+START_IMAGE = "https://files.catbox.moe/oht30s.jpg"
 
-START_TEXT = """<b>🎬 𝗔𝘂𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲 𝗙𝗼𝗿𝘄𝗮𝗿𝗱𝗲𝗿 𝗕𝗼𝘁 — Now Live!
+START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
 
 Auto forward videos & files from any private channel to your channel — without "Forwarded From" tag!
 
@@ -1038,12 +1038,17 @@ async def cmd_cancel(client, message: Message):
                       "addreplace","remreplace","listreplace","clearreplace",
                       "addremoveword","remremoveword","listremovewords","clearremovewords",
                       "count","resetcount","addadmin","removeuser","ban","unban",
-                      "broadcast"])
+                      "broadcast","reset","settings","manage"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
     if user_id not in login_states:
-        return
+        # ✅ FIX: sirf 'return' karne se Pyrogram is group ke aage kisi
+        # aur handler (jaise /settings, /manage, /reset) ko chance hi nahi
+        # deta tha — ContinuePropagation se aage ke handlers ko turant
+        # mauka mil jaata hai, chahe woh command upar wali exclusion list
+        # mein add karna bhool jaaye.
+        raise ContinuePropagation
 
     state = login_states[user_id]
     step  = state.get("step")
