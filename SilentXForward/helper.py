@@ -59,6 +59,12 @@ HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 🔍 Filter:
 /addfilter [word] | /remfilter [word] | /listfilters
 
+✅ Whitelist (same as Filter):
+/whitelist [word] | /remove_whitelist [word]
+
+🚫 Blacklist (in words wale messages skip honge):
+/blacklist [word] | /remove_blacklist [word] | /listblacklist
+
 ✍️ Footer:
 /endtext [Text] | /remendtext | /listendtext
 
@@ -382,6 +388,80 @@ async def cmd_listfilters(client, message: Message):
                                         parse_mode=enums.ParseMode.HTML)
     text = "<b>🔍 Active Filters:</b>\n\n"
     for i, w in enumerate(fil_list, 1):
+        text += f"{i}. <code>{w}</code>\n"
+    await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== WHITELIST (alias of Filters) ====================
+# ✅ NEW: /whitelist == /addfilter — sirf naam alag hai, kaam wahi hai
+# (sirf wahi messages forward honge jinme yeh word ho).
+
+@Client.on_message(filters.command("whitelist") & filters.private)
+async def cmd_whitelist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/whitelist word</code>\n\nSirf wahi messages forward honge jisme yeh word ho.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    added = await database.add_filter(message.from_user.id, word)
+    if added:
+        await message.reply_text(f"✅ <b>Whitelist word added:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Already exists:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remove_whitelist") & filters.private)
+async def cmd_remove_whitelist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remove_whitelist word</code>", parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    removed = await database.remove_filter(message.from_user.id, word)
+    if removed:
+        await message.reply_text(f"🗑️ <b>Whitelist word removed:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Not found:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+
+# ==================== BLACKLIST (opposite of Whitelist) ====================
+# ✅ NEW: in words wale messages SKIP ho jaayenge (forward nahi honge).
+
+@Client.on_message(filters.command("blacklist") & filters.private)
+async def cmd_blacklist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/blacklist word</code>\n\nYeh word jis message mein hoga, woh forward nahi hoga.",
+            parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    added = await database.add_blacklist_word(message.from_user.id, word)
+    if added:
+        await message.reply_text(f"✅ <b>Blacklist word added:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Already exists:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("remove_blacklist") & filters.private)
+async def cmd_remove_blacklist(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "<b>❌ Usage:</b> <code>/remove_blacklist word</code>", parse_mode=enums.ParseMode.HTML
+        )
+    word = " ".join(message.command[1:]).lower().strip()
+    removed = await database.remove_blacklist_word(message.from_user.id, word)
+    if removed:
+        await message.reply_text(f"🗑️ <b>Blacklist word removed:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+    else:
+        await message.reply_text(f"⚠️ <b>Not found:</b> <code>{word}</code>", parse_mode=enums.ParseMode.HTML)
+
+@Client.on_message(filters.command("listblacklist") & filters.private)
+async def cmd_listblacklist(client, message: Message):
+    bl = await database.get_blacklist(message.from_user.id)
+    if not bl:
+        return await message.reply_text("🚫 <b>No blacklist words set.</b>\n\nUse /blacklist to add one.",
+                                        parse_mode=enums.ParseMode.HTML)
+    text = "<b>🚫 Blacklist Words:</b>\n\n"
+    for i, w in enumerate(bl, 1):
         text += f"{i}. <code>{w}</code>\n"
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
@@ -1038,7 +1118,8 @@ async def cmd_cancel(client, message: Message):
                       "addreplace","remreplace","listreplace","clearreplace",
                       "addremoveword","remremoveword","listremovewords","clearremovewords",
                       "count","resetcount","addadmin","removeuser","ban","unban",
-                      "broadcast","reset","settings","manage"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
+                      "broadcast","reset","settings","manage",
+                      "whitelist","remove_whitelist","blacklist","remove_blacklist","listblacklist"])  # ✅ FIX: naye commands add kiye — warna yeh handler unhe pehle hi "swallow" kar leta tha
 )
 async def login_step_handler(client, message: Message):
     user_id = message.from_user.id
@@ -1226,6 +1307,7 @@ def _sc(text: str) -> str:
 _INPUT_BACK_MENU = {
     "delay": "delay",
     "filter_add": "filters", "filter_rem": "filters",
+    "blacklist_add": "filters", "blacklist_rem": "filters",
     "footer_set": "footer",
     "caption_set": "caption",
     "replace_add": "replace", "replace_rem": "replace",
@@ -1236,8 +1318,10 @@ _INPUT_BACK_MENU = {
 
 INPUT_PROMPTS = {
     "delay":              "✏️ <b>Naya delay (seconds) bhejo:</b>\n\n<i>Example: 0.3</i>",
-    "filter_add":         "➕ <b>Filter word bhejo</b> jo add karna hai:",
-    "filter_rem":         "🗑️ <b>Filter word bhejo</b> jo remove karna hai:",
+    "filter_add":         "➕ <b>Whitelist word bhejo</b> jo add karna hai:",
+    "filter_rem":         "🗑️ <b>Whitelist word bhejo</b> jo remove karna hai:",
+    "blacklist_add":      "➕ <b>Blacklist word bhejo</b> jo add karna hai:",
+    "blacklist_rem":      "🗑️ <b>Blacklist word bhejo</b> jo remove karna hai:",
     "footer_set":         "✏️ <b>Naya footer/prefix text bhejo:</b>",
     "caption_set":        CAPTION_VARS_TEXT + "\n\n✏️ <b>Ab apna template bhejo:</b>",
     "replace_add":        "➕ <b>Replace rule bhejo</b> — format: <code>Old:New</code>\n(multiple ke liye <code>|</code> se separate karo)",
@@ -1291,12 +1375,18 @@ async def _render_delay(user_id):
 
 async def _render_filters(user_id):
     words = await database.get_filters(user_id)
-    text = "🔍 <b>Keyword Filters</b>\n\n"
-    text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>No filters set — sab messages forward honge.</i>"
+    bl = await database.get_blacklist(user_id)
+    text = "🔍 <b>Whitelist Words</b> <i>(sirf yeh wale forward honge)</i>\n\n"
+    text += "\n".join(f"• <code>{w}</code>" for w in words) if words else "<i>Empty — sab messages forward honge.</i>"
+    text += "\n\n🚫 <b>Blacklist Words</b> <i>(yeh wale skip honge)</i>\n\n"
+    text += "\n".join(f"• <code>{w}</code>" for w in bl) if bl else "<i>Empty.</i>"
     kb = [
-        [InlineKeyboardButton(_sc("➕ Add"), callback_data="input:filter_add"),
+        [InlineKeyboardButton(_sc("➕ Add Whitelist"), callback_data="input:filter_add"),
          InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:filter_rem")],
-        [InlineKeyboardButton(_sc("🧹 Clear All"), callback_data="action:filter_clear")],
+        [InlineKeyboardButton(_sc("➕ Add Blacklist"), callback_data="input:blacklist_add"),
+         InlineKeyboardButton(_sc("🗑️ Remove"), callback_data="input:blacklist_rem")],
+        [InlineKeyboardButton(_sc("🧹 Clear Whitelist"), callback_data="action:filter_clear"),
+         InlineKeyboardButton(_sc("🧹 Clear Blacklist"), callback_data="action:blacklist_clear")],
         _back_menu_button(),
     ]
     return text, InlineKeyboardMarkup(kb)
@@ -1476,7 +1566,11 @@ async def cb_menu_action(client, callback_query):
 
     if action == "filter_clear":
         await database.clear_filters(user_id)
-        msg = "🧹 All filters cleared!"
+        msg = "🧹 All whitelist words cleared!"
+        text, kb = await _render_filters(user_id)
+    elif action == "blacklist_clear":
+        await database.clear_blacklist(user_id)
+        msg = "🧹 All blacklist words cleared!"
         text, kb = await _render_filters(user_id)
     elif action == "footer_rem":
         await database.remove_endtext(user_id)
@@ -1579,11 +1673,19 @@ async def settings_menu_input_handler(client, message: Message):
 
         elif action == "filter_add":
             added = await database.add_filter(user_id, raw)
-            msg = "✅ Filter added!" if added else "⚠️ Yeh filter already hai."
+            msg = "✅ Whitelist word added!" if added else "⚠️ Yeh word already hai."
 
         elif action == "filter_rem":
             removed = await database.remove_filter(user_id, raw)
-            msg = "🗑️ Filter removed!" if removed else "⚠️ Yeh filter mila nahi."
+            msg = "🗑️ Whitelist word removed!" if removed else "⚠️ Yeh word mila nahi."
+
+        elif action == "blacklist_add":
+            added = await database.add_blacklist_word(user_id, raw)
+            msg = "✅ Blacklist word added!" if added else "⚠️ Yeh word already hai."
+
+        elif action == "blacklist_rem":
+            removed = await database.remove_blacklist_word(user_id, raw)
+            msg = "🗑️ Blacklist word removed!" if removed else "⚠️ Yeh word mila nahi."
 
         elif action == "footer_set":
             await database.set_endtext(user_id, raw)
