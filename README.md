@@ -1,4 +1,4 @@
-# MRN_OfficialX_Forward_Bot
+# Prime-Forward-Bot-2.0
 
 A Powerful And Efficient Telegram Bot Designed To Forward Videos And Documents From Multiple Source Channels To Multiple Target Channels Without The "Forwarded From" Tag.
 
