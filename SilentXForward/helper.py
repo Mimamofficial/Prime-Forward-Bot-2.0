@@ -17,33 +17,9 @@ import config as cfg
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-START_IMAGE = "https://files.catbox.moe/oht30s.jpg"
+START_IMAGE = ""
 
-START_TEXT = """<b>🎬 Prime Forward Bot — Now Live!
-
-Auto forward videos & files from any private channel to your channel — without "Forwarded From" tag!
-
-🚀 Premium Auto Forwarder Features 🚀
-
-✨ Session Login → Direct Instant Forward
-✨ Without Login → Bot Admin Required
-✨ Userbot + Bot Dual Support
-✨ Unlimited Source & Target Support
-✨ Bulk / Album Auto Forward
-✨ Auto FloodWait Protection
-✨ No Duplicate Messages
-✨ Auto Retry + Auto Recovery
-✨ Super Fast & Stable Forwarding
-✨ Smooth & Professional System
-➖➖➖➖➖➖➖➖➖➖➖➖➖➖
-🎯 Get Started:
-➤ /login (for private access)
-➤ /set source target
-➤ Sit back & enjoy automation 😎
-
-🔥 Experience Next Level Forwarding
-<blockquote>👨‍💻 Maintained by <a href="https://t.me/Dark_of_Danger">𝄟͢🦋⃟≛⃝ 𝐃𝐚𝐫𝐤 𝐨𝐟 𝐃𝐚𝐧𝐠𝐞𝐫 𝄟⃝❤</a></blockquote></b>
-"""
+START_TEXT = """<b>🛑 BETA BOT 🛑 { USE @Prime_Forwards_Bot }</b>"""
 
 HELP_TEXT = """<b>⭐ Auto Forward Bot (Master Edition) ⭐
 
